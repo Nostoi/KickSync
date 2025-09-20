@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sideline Timekeeper</title>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #101a32; --ink: #e6eefc; --muted:#9fb0d1;
+    --accent:#4ea1ff; --ok:#24c88b; --under:#ffb020; --over:#ff6b6b;
+    --warn:#ffd166; --line:#1f2c4d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  header { padding: 12px 16px; background: #0a142a; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size: 18px; margin:0; font-weight:700; }
+  header .grow { flex:1; }
+  .btn {
+    appearance:none; border:1px solid var(--line); background:#0e1a36; color:var(--ink);
+    padding:8px 12px; border-radius:8px; font-weight:600; cursor:pointer;
+  }
+  .btn.primary { background:var(--accent); color:#001933; border-color:#2a81e0; }
+  .btn.warn { background:var(--warn); color:#1b1400; border-color:#caa94a; }
+  .btn.ghost { background:transparent; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+  .wrap { padding:12px; display:flex; gap:12px; flex-direction:column; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .grid { display:grid; gap:12px; }
+  @media (min-width: 960px) {
+    .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+    .grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  }
+  .section-title { font-size:14px; color:var(--muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:.06em; }
+  input, select, textarea {
+    width:100%; background:#0b1530; border:1px solid var(--line); color:var(--ink);
+    padding:8px; border-radius:8px;
+  }
+  textarea { min-height: 160px; }
+  table { width:100%; border-collapse: collapse; }
+  th, td { text-align:left; padding:8px; border-bottom: 1px solid var(--line); font-size:14px; }
+  th { color: var(--muted); font-weight:600; }
+  tr:hover td { background:#0c1732; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid var(--line); font-size:12px; color:var(--muted); }
+  .status-in { background:#0b2a17; color:#b6f2ce; border-color:#1f5030; }
+  .status-out { background:#2a0b0b; color:#f2b6b6; border-color:#502323; }
+  .fair.ok { color: var(--ok); font-weight:700; }
+  .fair.under { color: var(--under); font-weight:700; }
+  .fair.over { color: var(--over); font-weight:700; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .hint { color: var(--muted); font-size:12px; }
+  .danger { color: var(--over); }
+  .success { color: var(--ok); }
+  .accent { color: var(--accent); }
+  .divider { height:1px; background:var(--line); margin:8px 0; }
+  .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight:700; border:1px solid var(--line); padding:2px 6px; border-radius:6px; background:#0c1730; }
+  .sticky-footer { position: sticky; bottom: 0; background: var(--panel); padding: 8px; border-top:1px solid var(--line); border-bottom-left-radius:12px; border-bottom-right-radius:12px; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sideline Timekeeper</h1>
+  <div class="grow"></div>
+  <div class="toolbar">
+    <button class="btn" id="btnSetup">Setup</button>
+    <button class="btn" id="btnLineup">Lineup</button>
+    <button class="btn primary" id="btnGame">Game</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- Setup -->
+  <section class="panel" id="viewSetup">
+    <div class="section-title">1) Roster</div>
+    <div class="grid cols-2">
+      <div>
+        <label class="hint">Enter one per line: <b>Name[,Number][,Preferred (e.g. ST,MF)]</b></label>
+        <textarea id="rosterInput" placeholder="Alice,10,ST&#10;Ben,7,MF,DF&#10;Casey,22,DF&#10;..."></textarea>
+        <div class="row">
+          <button class="btn" id="btnExample">Use Example 17-Player Roster</button>
+          <button class="btn primary" id="btnLoadRoster">Apply Roster</button>
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Save / Load Game</div>
+        <div class="row">
+          <button class="btn" id="btnSave">Save Game (JSON)</button>
+          <input type="file" id="fileLoad" accept=".json" class="hidden" />
+          <button class="btn" id="btnLoad">Load Game (JSON)</button>
+          <button class="btn ghost" id="btnClear">Clear All</button>
+        </div>
+        <div class="divider"></div>
+        <div class="section-title">Scheduled Start & Halftime</div>
+        <div class="row">
+          <label>Schedule (today, 24h):</label>
+          <input id="scheduledHHMM" placeholder="14:30" style="max-width:160px" />
+          <button class="btn" id="btnSetSchedule">Set</button>
+          <span class="hint" id="scheduledLabel"></span>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="btnStart">Start / Resume</button>
+          <button class="btn" id="btnPause">Pause</button>
+          <button class="btn" id="btnHalftime">Start Halftime (10.5m)</button>
+          <button class="btn" id="btnEndHalftime">Force End Halftime</button>
+        </div>
+        <div class="divider"></div>
+        <div class="row">
+          <label>Adjust Elapsed (+/- sec):</label>
+          <input id="adjustSec" placeholder="e.g. -30" style="max-width:120px" />
+          <button class="btn" id="btnAdjust">Apply</button>
+        </div>
+        <p class="hint">Tip: Save at kickoff, halftime, and full time. State also persists in your browser (localStorage).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Lineup -->
+  <section class="panel hidden" id="viewLineup">
+    <div class="section-title">2) Pick Starting Lineup (1 GK, 3 DF, 2 MF, 3 ST)</div>
+    <div class="grid cols-3">
+      <div>
+        <div class="section-title">Required Slots</div>
+        <ul id="slotList" style="list-style:none;padding:0;margin:0"></ul>
+      </div>
+      <div>
+        <div class="section-title">Roster</div>
+        <table id="rosterTable">
+          <thead><tr><th>Name</th><th>#</th><th>Preferred</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div>
+        <div class="section-title">Assignments</div>
+        <table id="assignTable">
+          <thead><tr><th>Slot</th><th>Player</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="sticky-footer row" style="justify-content:space-between">
+      <span class="hint">Tap a slot → tap a player to assign. Duplicate prevention included.</span>
+      <div class="row">
+        <button class="btn ghost" id="btnClearAssign">Clear All</button>
+        <button class="btn primary" id="btnStartGame">Start Game</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Game -->
+  <section class="panel hidden" id="viewGame">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <div class="row" style="gap:12px">
+        <div class="pill" id="clockLabel">00:00 / 60:00</div>
+        <div class="pill" id="statusLabel">PAUSED</div>
+        <div class="pill" id="halfLabel" style="display:none">HALFTIME</div>
+        <div class="pill" id="schedLabel" style="display:none">Starts in 00:00</div>
+      </div>
+      <div class="row">
+        <button class="btn" id="gStart">Start/Resume</button>
+        <button class="btn" id="gPause">Pause</button>
+        <button class="btn" id="gHalf">Halftime (10.5m)</button>
+        <button class="btn" id="gSave">Save</button>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:12px">
+      <div class="panel">
+        <div class="section-title">On Field</div>
+        <table id="onFieldTable">
+          <thead>
+            <tr><th>Pos</th><th>Name</th><th>#</th><th>Stint</th><th>Total</th><th>Pref</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <div class="section-title">Roster / Choose Replacement</div>
+        <table id="rosterGameTable">
+          <thead>
+            <tr><th>Name</th><th>#</th><th>Status</th><th>Pos</th><th>Stint</th><th>Total</th><th>Pref</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="divider"></div>
+        <div class="row" style="justify-content:space-between">
+          <div class="hint">Select OUT from On Field, then IN from Roster. Queue multiple, then commit.</div>
+          <div class="row">
+            <button class="btn" id="btnQueue">Queue Selected</button>
+            <button class="btn" id="btnClearQueue">Clear Queue</button>
+            <button class="btn primary" id="btnCommit">Commit Subs</button>
+          </div>
+        </div>
+        <ul id="queueList" style="list-style:none;padding:0;margin-top:8px"></ul>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+/** -------------------------
+ *  Data Model & Utilities
+ *  ------------------------- */
+const GAME_LENGTH_MIN = 60;
+const EQUAL_TARGET_MIN = 30;
+const HALFTIME_MIN = 10.5;
+const REQUIRED_SLOTS = ["GK","DF","DF","DF","MF","MF","ST","ST","ST"];
+const POS_FULL = {GK:"Goalkeeper", DF:"Defender", MF:"Midfielder", ST:"Striker"};
+
+let state = {
+  players: [], // {name, number, preferred, totalSec, onField, position, stintStart}
+  gameStartTs: null,
+  paused: true,
+  halftimeEndTs: null,
+  scheduledStartTs: null,
+  elapsedAdjustment: 0
+};
+
+let ui = {
+  // nav
+  btnSetup: document.getElementById("btnSetup"),
+  btnLineup: document.getElementById("btnLineup"),
+  btnGame: document.getElementById("btnGame"),
+  viewSetup: document.getElementById("viewSetup"),
+  viewLineup: document.getElementById("viewLineup"),
+  viewGame: document.getElementById("viewGame"),
+
+  // setup
+  rosterInput: document.getElementById("rosterInput"),
+  btnExample: document.getElementById("btnExample"),
+  btnLoadRoster: document.getElementById("btnLoadRoster"),
+  btnSave: document.getElementById("btnSave"),
+  btnLoad: document.getElementById("btnLoad"),
+  btnClear: document.getElementById("btnClear"),
+  fileLoad: document.getElementById("fileLoad"),
+  scheduledHHMM: document.getElementById("scheduledHHMM"),
+  btnSetSchedule: document.getElementById("btnSetSchedule"),
+  scheduledLabel: document.getElementById("scheduledLabel"),
+  btnStart: document.getElementById("btnStart"),
+  btnPause: document.getElementById("btnPause"),
+  btnHalftime: document.getElementById("btnHalftime"),
+  btnEndHalftime: document.getElementById("btnEndHalftime"),
+  adjustSec: document.getElementById("adjustSec"),
+  btnAdjust: document.getElementById("btnAdjust"),
+
+  // lineup
+  slotList: document.getElementById("slotList"),
+  rosterTable: document.querySelector("#rosterTable tbody"),
+  assignTable: document.querySelector("#assignTable tbody"),
+  btnClearAssign: document.getElementById("btnClearAssign"),
+  btnStartGame: document.getElementById("btnStartGame"),
+
+  // game
+  clockLabel: document.getElementById("clockLabel"),
+  statusLabel: document.getElementById("statusLabel"),
+  halfLabel: document.getElementById("halfLabel"),
+  schedLabel: document.getElementById("schedLabel"),
+  gStart: document.getElementById("gStart"),
+  gPause: document.getElementById("gPause"),
+  gHalf: document.getElementById("gHalf"),
+  gSave: document.getElementById("gSave"),
+  onFieldTable: document.querySelector("#onFieldTable tbody"),
+  rosterGameTable: document.querySelector("#rosterGameTable tbody"),
+  btnQueue: document.getElementById("btnQueue"),
+  btnClearQueue: document.getElementById("btnClearQueue"),
+  btnCommit: document.getElementById("btnCommit"),
+  queueList: document.getElementById("queueList"),
+};
+
+let selectedSlotIndex = null;  // for lineup
+let selectedOutName = null;    // in-game OUT selection
+let selectedInName = null;     // in-game IN selection
+let subQueue = [];             // [{out,in}]
+let tickHandle = null;
+
+function nowSec() { return Math.floor(Date.now()/1000); }
+function fmtMMSS(sec) { sec = Math.max(0, sec|0); const m = Math.floor(sec/60), s = sec%60; return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`; }
+function saveLocal() { localStorage.setItem("sideline_state", JSON.stringify(state)); }
+function loadLocal() { const s = localStorage.getItem("sideline_state"); if(s){ state = JSON.parse(s); } }
+function resetAll() {
+  state = { players:[], gameStartTs:null, paused:true, halftimeEndTs:null, scheduledStartTs:null, elapsedAdjustment:0 };
+  subQueue = []; selectedOutName = null; selectedInName = null; selectedSlotIndex = null;
+  saveLocal(); renderAll();
+}
+
+function fairnessClass(totalSec) {
+  const delta = totalSec - EQUAL_TARGET_MIN*60;
+  if (delta < -180) return "under";
+  if (delta > 180) return "over";
+  return "ok";
+}
+
+function currentStint(p) {
+  if (p.onField && p.stintStart) return nowSec() - p.stintStart;
+  return 0;
+}
+
+function totalLive(p) {
+  return (p.totalSec|0) + currentStint(p);
+}
+
+/** -------------------------
+ *  Navigation & Views
+ *  ------------------------- */
+function show(view) {
+  ui.viewSetup.classList.toggle("hidden", view!=="setup");
+  ui.viewLineup.classList.toggle("hidden", view!=="lineup");
+  ui.viewGame.classList.toggle("hidden", view!=="game");
+}
+
+ui.btnSetup.onclick = () => { show("setup"); };
+ui.btnLineup.onclick = () => { show("lineup"); renderLineup(); };
+ui.btnGame.onclick = () => { show("game"); renderGame(); };
+
+/** -------------------------
+ *  Setup
+ *  ------------------------- */
+ui.btnExample.onclick = () => {
+  const sample = [];
+  for (let i=1;i<=17;i++){
+    const pref = (i<=4)?"ST":(i<=8)?"MF":(i<=14)?"DF":"GK";
+    sample.push(`Player ${i},${String(i).padStart(2,"0")},${pref}`);
+  }
+  ui.rosterInput.value = sample.join("\n");
+};
+
+ui.btnLoadRoster.onclick = () => {
+  const lines = ui.rosterInput.value.split("\n").map(s=>s.trim()).filter(Boolean);
+  const players = [];
+  const seen = new Set();
+  for (const ln of lines) {
+    const parts = ln.split(",").map(s=>s.trim()).filter(s=>s.length);
+    const name = parts[0]; if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const number = parts[1] || "";
+    const preferred = parts[2] || "";
+    players.push({name, number, preferred, totalSec: 0, onField:false, position:null, stintStart:null});
+  }
+  if (players.length < 9) { alert("Need at least 9 players."); return; }
+  state.players = players;
+  saveLocal();
+  alert("Roster loaded.");
+};
+
+ui.btnSave.onclick = () => {
+  // snapshot live totals for save
+  const snap = JSON.parse(JSON.stringify(state));
+  const n = nowSec();
+  snap.players.forEach(p=>{
+    if (p.onField && p.stintStart) {
+      p.totalSec += (n - p.stintStart);
+      // keep stintStart so live resume matches reality
+    }
+  });
+  const blob = new Blob([JSON.stringify(snap,null,2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `sideline_${new Date().toISOString().replace(/[:.]/g,"-")}.json`;
+  a.click();
+};
+
+ui.btnLoad.onclick = () => ui.fileLoad.click();
+ui.fileLoad.onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const txt = await file.text();
+  try {
+    const obj = JSON.parse(txt);
+    // basic shape validation
+    if (!Array.isArray(obj.players)) throw new Error("Invalid file");
+    state = obj;
+    saveLocal();
+    renderAll();
+    alert("Game loaded.");
+  } catch (err) {
+    alert("Failed to load: "+err.message);
+  } finally {
+    e.target.value = "";
+  }
+};
+
+ui.btnClear.onclick = () => {
+  if (confirm("Clear roster and game state?")) resetAll();
+};
+
+ui.btnSetSchedule.onclick = () => {
+  const t = ui.scheduledHHMM.value.trim();
+  if (!t || !/^\d{1,2}:\d{2}$/.test(t)) { alert("Use HH:MM (24-hour)"); return; }
+  const [hh,mm] = t.split(":").map(Number);
+  const d = new Date();
+  d.setHours(hh, mm, 0, 0);
+  state.scheduledStartTs = Math.floor(d.getTime()/1000);
+  saveLocal();
+  renderSetup();
+};
+
+ui.btnStart.onclick = startGame;
+ui.btnPause.onclick = pauseGame;
+ui.btnHalftime.onclick = startHalftime;
+ui.btnEndHalftime.onclick = endHalftime;
+
+ui.btnAdjust.onclick = () => {
+  const v = parseInt(ui.adjustSec.value, 10);
+  if (isNaN(v)) return;
+  state.elapsedAdjustment = (state.elapsedAdjustment|0) + v;
+  saveLocal();
+  ui.adjustSec.value = "";
+  renderGame();
+};
+
+/** -------------------------
+ *  Lineup
+ *  ------------------------- */
+function renderLineup() {
+  // slots
+  ui.slotList.innerHTML = "";
+  REQUIRED_SLOTS.forEach((pos, idx)=>{
+    const li = document.createElement("li");
+    li.style.padding="6px 8px";
+    li.style.border="1px solid var(--line)";
+    li.style.borderRadius="8px";
+    li.style.marginBottom="6px";
+    li.style.cursor="pointer";
+    li.dataset.index = idx;
+    li.innerHTML = `<b>${idx+1}. ${pos}</b> – ${POS_FULL[pos]}`;
+    li.onclick = () => { selectedSlotIndex = idx; highlightSlots(); };
+    ui.slotList.appendChild(li);
+  });
+  highlightSlots();
+
+  // roster table
+  ui.rosterTable.innerHTML = "";
+  state.players.slice().sort((a,b)=> (a.number||"").localeCompare(b.number||"") || a.name.localeCompare(b.name))
+    .forEach(p=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${p.name}</td><td>${p.number||""}</td><td>${(p.preferred||"").toUpperCase()}</td>`;
+      tr.style.cursor="pointer";
+      tr.onclick = ()=>assignSelectedSlot(p.name);
+      ui.rosterTable.appendChild(tr);
+    });
+
+  // assignments table mirrors an internal map kept via DOM
+  ui.assignTable.innerHTML = "";
+}
+
+function highlightSlots() {
+  Array.from(ui.slotList.children).forEach((li,i)=>{
+    li.style.background = (i===selectedSlotIndex) ? "#0c1732" : "transparent";
+  });
+}
+
+function assignSelectedSlot(playerName) {
+  if (selectedSlotIndex===null) { alert("Select a slot on the left first."); return; }
+  // prevent duplicate player
+  const existing = Array.from(ui.assignTable.querySelectorAll("tr td:nth-child(2)")).map(td=>td.textContent);
+  if (existing.includes(playerName)) { alert("Player already assigned."); return; }
+
+  // remove previous assignment on this slot
+  const slotLabel = `${selectedSlotIndex+1}. ${REQUIRED_SLOTS[selectedSlotIndex]}`;
+  const rows = Array.from(ui.assignTable.querySelectorAll("tr"));
+  for (const r of rows) {
+    if (r.children[0].textContent === slotLabel) r.remove();
+  }
+
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${slotLabel}</td><td>${playerName}</td>`;
+  ui.assignTable.appendChild(tr);
+}
+
+ui.btnClearAssign.onclick = () => { ui.assignTable.innerHTML = ""; };
+
+ui.btnStartGame.onclick = () => {
+  // Build assignments
+  const assigned = {};
+  Array.from(ui.assignTable.querySelectorAll("tr")).forEach(r=>{
+    const slot = r.children[0].textContent; // "1. GK"
+    const pos = slot.split(".")[1].trim().split(" ")[0];
+    const name = r.children[1].textContent;
+    assigned[pos] = (assigned[pos]||[]).concat([name]);
+  });
+  // Validate exact formation
+  const need = {GK:1, DF:3, MF:2, ST:3};
+  const got = {GK:(assigned.GK||[]).length, DF:(assigned.DF||[]).length, MF:(assigned.MF||[]).length, ST:(assigned.ST||[]).length};
+  if (JSON.stringify(need)!==JSON.stringify(got)) { alert(`Need exactly ${JSON.stringify(need)}, got ${JSON.stringify(got)}`); return; }
+
+  // Reset and apply
+  const n = nowSec();
+  state.players.forEach(p=>{ p.onField=false; p.position=null; p.stintStart=null; });
+  for (const [pos, names] of Object.entries(assigned)) {
+    for (const nm of names) {
+      const p = state.players.find(x=>x.name===nm);
+      if (p) { p.onField = true; p.position = pos; p.stintStart = n; }
+    }
+  }
+  if (!state.gameStartTs) state.gameStartTs = n;
+  state.paused = false;
+  saveLocal();
+  show("game");
+  renderGame();
+  startTick();
+};
+
+/** -------------------------
+ *  Game
+ *  ------------------------- */
+function startGame() {
+  const n = nowSec();
+  if (!state.gameStartTs) state.gameStartTs = n;
+  state.paused = false;
+  // resume any paused stints (stintStart null means paused)
+  state.players.forEach(p=>{
+    if (p.onField && !p.stintStart) p.stintStart = n;
+  });
+  saveLocal();
+  renderGame();
+  startTick();
+}
+
+function pauseGame() {
+  if (state.paused) return;
+  const n = nowSec();
+  state.players.forEach(p=>{
+    if (p.onField && p.stintStart) {
+      p.totalSec += (n - p.stintStart);
+      p.stintStart = null;
+    }
+  });
+  state.paused = true;
+  saveLocal();
+  renderGame();
+  stopTick();
+}
+
+function startHalftime() {
+  pauseGame();
+  state.halftimeEndTs = nowSec() + Math.floor(HALFTIME_MIN*60);
+  saveLocal();
+  renderGame();
+  startTick(); // to show countdown
+}
+
+function endHalftime() {
+  state.halftimeEndTs = null;
+  saveLocal();
+  renderGame();
+}
+
+ui.gStart.onclick = startGame;
+ui.gPause.onclick = pauseGame;
+ui.gHalf.onclick = startHalftime;
+ui.gSave.onclick = () => ui.btnSave.click();
+
+function elapsedSeconds() {
+  if (!state.gameStartTs) return 0;
+  const base = nowSec() - state.gameStartTs;
+  return Math.max(0, base + (state.elapsedAdjustment|0));
+}
+
+function renderGame() {
+  // top labels
+  if (state.halftimeEndTs && nowSec() <= state.halftimeEndTs) {
+    const remain = Math.max(0, state.halftimeEndTs - nowSec());
+    ui.clockLabel.textContent = `HALFTIME ${fmtMMSS(remain)}`;
+    ui.halfLabel.style.display = "";
+  } else {
+    ui.halfLabel.style.display = "none";
+    ui.clockLabel.textContent = `${fmtMMSS(elapsedSeconds())} / ${fmtMMSS(GAME_LENGTH_MIN*60)}`;
+  }
+  ui.statusLabel.textContent = state.paused ? "PAUSED" : "RUNNING";
+
+  if (state.scheduledStartTs && !state.gameStartTs) {
+    const delta = state.scheduledStartTs - nowSec();
+    if (delta > 0) {
+      ui.schedLabel.style.display = ""; ui.schedLabel.textContent = `Starts in ${fmtMMSS(delta)}`;
+    } else {
+      ui.schedLabel.style.display = ""; ui.schedLabel.textContent = `Starting…`;
+      startGame();
+    }
+  } else {
+    ui.schedLabel.style.display = "none";
+  }
+
+  // On-field table
+  ui.onFieldTable.innerHTML = "";
+  const order = {GK:0, DF:1, MF:2, ST:3};
+  const on = state.players.filter(p=>p.onField).sort((a,b)=>
+     (order[a.position||"Z"] - order[b.position||"Z"]) ||
+     (a.number||"").localeCompare(b.number||"") ||
+     a.name.localeCompare(b.name));
+
+  on.forEach(p=>{
+    const stint = currentStint(p);
+    const total = totalLive(p);
+    const tr = document.createElement("tr");
+    tr.onclick = ()=>{ selectedOutName = p.name; highlightSelections(); };
+    tr.innerHTML = `
+      <td>${p.position||"-"}</td>
+      <td>${p.name}</td>
+      <td>${p.number||""}</td>
+      <td>${fmtMMSS(stint)}</td>
+      <td><span class="fair ${fairnessClass(total)}">${fmtMMSS(total)}</span></td>
+      <td>${(p.preferred||"").toUpperCase()}</td>`;
+    ui.onFieldTable.appendChild(tr);
+  });
+
+  // Roster table
+  ui.rosterGameTable.innerHTML = "";
+  state.players.slice().sort((a,b)=> (a.onField===b.onField?0:a.onField?-1:1) || (a.number||"").localeCompare(b.number||"") || a.name.localeCompare(b.name))
+    .forEach(p=>{
+      const stint = currentStint(p);
+      const total = totalLive(p);
+      const tr = document.createElement("tr");
+      tr.onclick = ()=>{ selectedInName = p.name; highlightSelections(); };
+      tr.innerHTML = `
+        <td>${p.name}</td>
+        <td>${p.number||""}</td>
+        <td>${p.onField?'<span class="pill status-in">IN</span>':'<span class="pill status-out">OUT</span>'}</td>
+        <td>${p.position||"-"}</td>
+        <td>${fmtMMSS(stint)}</td>
+        <td><span class="fair ${fairnessClass(total)}">${fmtMMSS(total)}</span></td>
+        <td>${(p.preferred||"").toUpperCase()}</td>`;
+      ui.rosterGameTable.appendChild(tr);
+    });
+
+  // queue
+  ui.queueList.innerHTML = "";
+  subQueue.forEach((q, i)=>{
+    const li = document.createElement("li");
+    li.className = "row";
+    li.style.justifyContent="space-between";
+    li.style.padding="6px 0";
+    li.innerHTML = `<span>${q.out} &rarr; <b>${q._label||q.in}</b></span>
+      <button class="btn" onclick="removeQueue(${i})">Remove</button>`;
+    ui.queueList.appendChild(li);
+  });
+}
+
+function highlightSelections() {
+  // you’ll see selections in queue labels; table row highlighting is optional
+}
+
+ui.btnQueue.onclick = () => {
+  if (!selectedOutName) { alert("Select someone on the field to sub OUT."); return; }
+  if (!selectedInName) { alert("Select a roster player to sub IN / swap."); return; }
+  if (selectedOutName === selectedInName) { alert("Pick a different player for replacement."); return; }
+
+  // Label includes target slot (out player's position)
+  const outP = state.players.find(p=>p.name===selectedOutName);
+  const inP = state.players.find(p=>p.name===selectedInName);
+  const label = inP.name + (inP.onField ? ` (swap to ${outP.position})` : "");
+  subQueue.push({out: selectedOutName, in: selectedInName, _label: label});
+  selectedOutName = null; selectedInName = null;
+  renderGame();
+};
+
+ui.btnClearQueue.onclick = () => { subQueue = []; renderGame(); };
+
+function removeQueue(i) { subQueue.splice(i,1); renderGame(); }
+window.removeQueue = removeQueue; // expose for onclick
+
+ui.btnCommit.onclick = () => {
+  if (!subQueue.length) { alert("No subs queued."); return; }
+  const n = nowSec();
+  subQueue.forEach(q=>{
+    const pOut = state.players.find(p=>p.name===q.out);
+    const pIn  = state.players.find(p=>p.name===q.in);
+    if (!pOut || !pIn || !pOut.onField || !pOut.position) return;
+
+    // end OUT stint
+    if (pOut.stintStart) { pOut.totalSec += (n - pOut.stintStart); }
+    pOut.onField = false; pOut.position = null; pOut.stintStart = null;
+
+    // if IN is on field → position swap
+    if (pIn.onField) {
+      pIn.position = pOut.position;
+      // optional: place OUT into IN's old spot instead of benching (coach asked for one-way replace)
+      // to enable true swap both ways, uncomment below:
+      // pOut.onField = true; pOut.position = old; pOut.stintStart = n;
+    } else {
+      pIn.onField = true; pIn.position = pOut.position; pIn.stintStart = n;
+    }
+  });
+  subQueue = [];
+  saveLocal();
+  renderGame();
+};
+
+function startTick() {
+  if (tickHandle) return;
+  tickHandle = setInterval(()=>{
+    // halftime countdown end
+    if (state.halftimeEndTs && nowSec() >= state.halftimeEndTs) {
+      state.halftimeEndTs = null;
+      saveLocal();
+      alert("Halftime complete. Press Start/Resume to continue.");
+    }
+    renderGame();
+  }, 1000);
+}
+function stopTick(){ if (tickHandle) { clearInterval(tickHandle); tickHandle = null; } }
+
+/** -------------------------
+ *  Setup view secondary render
+ *  ------------------------- */
+function renderSetup() {
+  if (state.scheduledStartTs) {
+    const d = new Date(state.scheduledStartTs*1000);
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    ui.scheduledLabel.textContent = `Scheduled for ${hh}:${mm}`;
+  } else {
+    ui.scheduledLabel.textContent = "";
+  }
+}
+
+/** -------------------------
+ *  Boot
+ *  ------------------------- */
+function renderAll() {
+  renderSetup();
+  renderLineup();
+  renderGame();
+}
+loadLocal();
+renderAll();
+show("setup");
+startTick(); // keep countdown labels alive even when paused
+</script>
+</body>
+</html>

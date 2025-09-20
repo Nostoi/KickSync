@@ -1,0 +1,12 @@
+# Soccer Coach Sideline Timekeeper Requirements
+
+# Web interface dependencies
+Flask>=2.3.0
+
+# Development and testing dependencies (optional)
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0
+
+# Note: The application is designed to work with Python's built-in libraries
+# for maximum compatibility. Tkinter is included with Python on most systems.
