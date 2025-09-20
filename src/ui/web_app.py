@@ -707,7 +707,7 @@ def create_app(static_folder: str = ".") -> Flask:
     return app
 
 
-def run_web_app(host: str = "127.0.0.1", port: int = 5000, static_folder: str = ".") -> None:
+def run_web_app(host: str = "127.0.0.1", port: int = 7122, static_folder: str = ".") -> None:
     """
     Run the web application.
     

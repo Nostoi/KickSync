@@ -18,7 +18,7 @@ try:
     if __name__ == "__main__":
         # Run web app serving files from the project root
         project_root = os.path.dirname(__file__)
-        run_web_app(host="127.0.0.1", port=5000, static_folder=project_root)
+        run_web_app(host="127.0.0.1", port=7122, static_folder=project_root)
         
 except ImportError:
     # Fallback to original implementation if new structure not available
