@@ -65,7 +65,8 @@
   <div class="toolbar">
     <button class="btn" id="btnSetup">Setup</button>
     <button class="btn" id="btnLineup">Lineup</button>
-    <button class="btn primary" id="btnGame">Game</button>
+    <button class="btn" id="btnGame">Game</button>
+    <button class="btn" id="btnReports">Reports</button>
   </div>
 </header>
 
@@ -106,10 +107,29 @@
           <button class="btn" id="btnEndHalftime">Force End Halftime</button>
         </div>
         <div class="divider"></div>
+        <div class="section-title">Timer Configuration</div>
         <div class="row">
-          <label>Adjust Elapsed (+/- sec):</label>
-          <input id="adjustSec" placeholder="e.g. -30" style="max-width:120px" />
-          <button class="btn" id="btnAdjust">Apply</button>
+          <label>Regulation Minutes:</label>
+          <input id="formatMinutes" type="number" min="10" max="120" step="5" style="max-width:120px" />
+          <label>Periods:</label>
+          <select id="formatPeriods" style="max-width:140px">
+            <option value="1">1 Full Time</option>
+            <option value="2" selected>2 Halves</option>
+            <option value="3">3 Thirds</option>
+            <option value="4">4 Quarters</option>
+          </select>
+          <button class="btn" id="btnApplyFormat">Apply Format</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label>Manual Time:</label>
+          <select id="adjustKind" style="max-width:180px">
+            <option value="adjustment">Adjustment (+/-)</option>
+            <option value="stoppage">Stoppage / Injury</option>
+          </select>
+          <select id="adjustPeriod" style="max-width:160px"></select>
+          <input id="adjustSeconds" placeholder="Seconds" style="max-width:120px" />
+          <label class="hint"><input type="checkbox" id="adjustAll" style="margin-right:4px" />All periods</label>
+          <button class="btn" id="btnApplyManual">Apply</button>
         </div>
         <p class="hint">Tip: Save at kickoff, halftime, and full time. State also persists in your browser (localStorage).</p>
       </div>
@@ -154,7 +174,9 @@
       <div class="row" style="gap:12px">
         <div class="pill" id="clockLabel">00:00 / 60:00</div>
         <div class="pill" id="statusLabel">PAUSED</div>
-        <div class="pill" id="halfLabel" style="display:none">HALFTIME</div>
+        <div class="pill" id="periodPill">1st Half</div>
+        <div class="pill" id="metaPill">Stoppage 00:00 • Adjust +00:00</div>
+        <div class="pill" id="halfLabel" style="display:none">BREAK</div>
         <div class="pill" id="schedLabel" style="display:none">Starts in 00:00</div>
       </div>
       <div class="row">
@@ -163,6 +185,16 @@
         <button class="btn" id="gHalf">Halftime (10.5m)</button>
         <button class="btn" id="gSave">Save</button>
       </div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <div class="section-title">Period Summary</div>
+      <table id="periodTable">
+        <thead>
+          <tr><th>Period</th><th>Reg</th><th>Elapsed</th><th>Adj</th><th>Stop</th><th>Remain</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
     </div>
 
     <div class="grid cols-2" style="margin-top:12px">
@@ -197,6 +229,41 @@
     </div>
   </section>
 
+  <!-- Reports -->
+  <section class="panel hidden" id="viewReports">
+    <div class="section-title">4) Playing Time Analytics</div>
+    <div class="grid cols-2">
+      <div class="panel" style="min-height:120px">
+        <div class="section-title">Summary</div>
+        <p class="accent" id="reportSummary">Add players to view analytics.</p>
+        <p class="hint" id="reportDetail"></p>
+        <p class="hint" id="reportDistribution"></p>
+      </div>
+      <div class="panel" style="min-height:120px">
+        <div class="section-title">Targets</div>
+        <p class="hint" id="reportTargets"></p>
+        <p class="hint" id="reportElapsed"></p>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <table id="reportTable">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>#</th>
+          <th>Preferred</th>
+          <th>Status</th>
+          <th>Played</th>
+          <th>Target</th>
+          <th>Delta</th>
+          <th>Share</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="hint" id="reportNote">Delta compares playing time against an equal share of regulation, stoppage, and adjustments.</p>
+  </section>
+
 </div>
 
 <script>
@@ -204,28 +271,147 @@
  *  Data Model & Utilities
  *  ------------------------- */
 const GAME_LENGTH_MIN = 60;
-const EQUAL_TARGET_MIN = 30;
 const HALFTIME_MIN = 10.5;
+const PERIOD_LABELS = {1: "Full Time", 2: "Half", 3: "Third", 4: "Quarter"};
 const REQUIRED_SLOTS = ["GK","DF","DF","DF","MF","MF","ST","ST","ST"];
 const POS_FULL = {GK:"Goalkeeper", DF:"Defender", MF:"Midfielder", ST:"Striker"};
+const FAIRNESS_THRESHOLD = 120; // seconds
 
 let state = {
   players: [], // {name, number, preferred, totalSec, onField, position, stintStart}
   gameStartTs: null,
   paused: true,
+  breakActive: false,
   halftimeEndTs: null,
   scheduledStartTs: null,
-  elapsedAdjustment: 0
+  elapsedAdjustment: 0, // legacy aggregate
+  gameLengthSec: GAME_LENGTH_MIN * 60,
+  periodCount: 2,
+  periodElapsed: [],
+  periodAdjust: [],
+  periodStoppage: [],
+  currentPeriodIndex: 0,
+  periodStartTs: null
 };
+
+function ordinal(n) {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  const rem10 = n % 10;
+  const suffix = rem10 === 1 ? "st" : rem10 === 2 ? "nd" : rem10 === 3 ? "rd" : "th";
+  return `${n}${suffix}`;
+}
+
+function describePeriodLabel(number, total) {
+  const base = PERIOD_LABELS[total] || "Period";
+  if (total <= 1) return base;
+  return `${ordinal(number)} ${base}`;
+}
+
+function ensurePeriodArrays() {
+  const count = Math.max(1, state.periodCount | 0);
+  state.periodCount = count;
+  const expand = (arr) => {
+    if (!Array.isArray(arr)) arr = [];
+    if (arr.length < count) {
+      return arr.concat(Array(count - arr.length).fill(0));
+    }
+    if (arr.length > count) {
+      return arr.slice(0, count);
+    }
+    return arr;
+  };
+  state.periodElapsed = expand(state.periodElapsed);
+  state.periodAdjust = expand(state.periodAdjust);
+  state.periodStoppage = expand(state.periodStoppage);
+  if (state.currentPeriodIndex >= count) {
+    state.currentPeriodIndex = count - 1;
+  }
+}
+
+function normalizeState() {
+  state.gameLengthSec = Number(state.gameLengthSec || GAME_LENGTH_MIN * 60);
+  state.periodCount = Number(state.periodCount || 2);
+  state.elapsedAdjustment = Number(state.elapsedAdjustment || 0);
+  if (typeof state.currentPeriodIndex !== "number") state.currentPeriodIndex = 0;
+  if (typeof state.periodStartTs !== "number") state.periodStartTs = null;
+  state.breakActive = Boolean(state.breakActive);
+  ensurePeriodArrays();
+}
+
+function totalAdjustmentSeconds() {
+  ensurePeriodArrays();
+  return state.periodAdjust.slice(0, state.periodCount).reduce((sum, v) => sum + (v | 0), 0);
+}
+
+function recalcAggregateAdjustment() {
+  state.elapsedAdjustment = totalAdjustmentSeconds();
+}
+
+function totalStoppageSeconds() {
+  ensurePeriodArrays();
+  return state.periodStoppage.slice(0, state.periodCount).reduce((sum, v) => sum + (v | 0), 0);
+}
+
+function targetSecondsTotal() {
+  return Math.max(0, state.gameLengthSec + totalStoppageSeconds() + totalAdjustmentSeconds());
+}
+
+function targetSecondsPerPlayer() {
+  const rosterSize = Math.max(1, state.players.length);
+  return targetSecondsTotal() / rosterSize;
+}
+
+function baseElapsedSeconds(includeRunning = true) {
+  ensurePeriodArrays();
+  let total = state.periodElapsed.slice(0, state.periodCount).reduce((sum, v) => sum + (v | 0), 0);
+  if (includeRunning && state.periodStartTs && !state.paused && !state.breakActive) {
+    total += Math.max(0, nowSec() - state.periodStartTs);
+  }
+  if (total === 0 && state.gameStartTs) {
+    total = Math.max(0, nowSec() - state.gameStartTs);
+  }
+  return total;
+}
+
+function gameElapsedSeconds() {
+  return baseElapsedSeconds() + totalAdjustmentSeconds() + totalStoppageSeconds();
+}
+
+function periodTargetSeconds(index) {
+  ensurePeriodArrays();
+  const count = state.periodCount;
+  const base = Math.floor(state.gameLengthSec / count);
+  const remainder = state.gameLengthSec % count;
+  const reg = base + (index < remainder ? 1 : 0);
+  return reg + (state.periodAdjust[index] | 0) + (state.periodStoppage[index] | 0);
+}
+
+function periodRegulationSeconds(index) {
+  const count = state.periodCount;
+  const base = Math.floor(state.gameLengthSec / count);
+  const remainder = state.gameLengthSec % count;
+  return base + (index < remainder ? 1 : 0);
+}
+
+function periodRemainingSeconds(index) {
+  const target = periodTargetSeconds(index);
+  const elapsed = state.periodElapsed[index] + (index === state.currentPeriodIndex && state.periodStartTs && !state.paused && !state.breakActive ? Math.max(0, nowSec() - state.periodStartTs) : 0);
+  return Math.max(0, target - elapsed);
+}
+
+normalizeState();
 
 let ui = {
   // nav
   btnSetup: document.getElementById("btnSetup"),
   btnLineup: document.getElementById("btnLineup"),
   btnGame: document.getElementById("btnGame"),
+  btnReports: document.getElementById("btnReports"),
   viewSetup: document.getElementById("viewSetup"),
   viewLineup: document.getElementById("viewLineup"),
   viewGame: document.getElementById("viewGame"),
+  viewReports: document.getElementById("viewReports"),
 
   // setup
   rosterInput: document.getElementById("rosterInput"),
@@ -242,8 +428,14 @@ let ui = {
   btnPause: document.getElementById("btnPause"),
   btnHalftime: document.getElementById("btnHalftime"),
   btnEndHalftime: document.getElementById("btnEndHalftime"),
-  adjustSec: document.getElementById("adjustSec"),
-  btnAdjust: document.getElementById("btnAdjust"),
+  formatMinutes: document.getElementById("formatMinutes"),
+  formatPeriods: document.getElementById("formatPeriods"),
+  btnApplyFormat: document.getElementById("btnApplyFormat"),
+  adjustKind: document.getElementById("adjustKind"),
+  adjustPeriod: document.getElementById("adjustPeriod"),
+  adjustSeconds: document.getElementById("adjustSeconds"),
+  adjustAll: document.getElementById("adjustAll"),
+  btnApplyManual: document.getElementById("btnApplyManual"),
 
   // lineup
   slotList: document.getElementById("slotList"),
@@ -255,18 +447,30 @@ let ui = {
   // game
   clockLabel: document.getElementById("clockLabel"),
   statusLabel: document.getElementById("statusLabel"),
+  periodPill: document.getElementById("periodPill"),
+  metaPill: document.getElementById("metaPill"),
   halfLabel: document.getElementById("halfLabel"),
   schedLabel: document.getElementById("schedLabel"),
   gStart: document.getElementById("gStart"),
   gPause: document.getElementById("gPause"),
   gHalf: document.getElementById("gHalf"),
   gSave: document.getElementById("gSave"),
+  periodTable: document.querySelector("#periodTable tbody"),
   onFieldTable: document.querySelector("#onFieldTable tbody"),
   rosterGameTable: document.querySelector("#rosterGameTable tbody"),
   btnQueue: document.getElementById("btnQueue"),
   btnClearQueue: document.getElementById("btnClearQueue"),
   btnCommit: document.getElementById("btnCommit"),
   queueList: document.getElementById("queueList"),
+
+  // reports
+  reportSummary: document.getElementById("reportSummary"),
+  reportDetail: document.getElementById("reportDetail"),
+  reportDistribution: document.getElementById("reportDistribution"),
+  reportTargets: document.getElementById("reportTargets"),
+  reportElapsed: document.getElementById("reportElapsed"),
+  reportTable: document.querySelector("#reportTable tbody"),
+  reportNote: document.getElementById("reportNote"),
 };
 
 let selectedSlotIndex = null;  // for lineup
@@ -277,18 +481,49 @@ let tickHandle = null;
 
 function nowSec() { return Math.floor(Date.now()/1000); }
 function fmtMMSS(sec) { sec = Math.max(0, sec|0); const m = Math.floor(sec/60), s = sec%60; return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`; }
-function saveLocal() { localStorage.setItem("sideline_state", JSON.stringify(state)); }
-function loadLocal() { const s = localStorage.getItem("sideline_state"); if(s){ state = JSON.parse(s); } }
+function fmtSignedMMSS(sec) { const sign = sec >= 0 ? "+" : "-"; return sign + fmtMMSS(Math.abs(sec)); }
+function saveLocal() {
+  recalcAggregateAdjustment();
+  localStorage.setItem("sideline_state", JSON.stringify(state));
+}
+function loadLocal() {
+  const s = localStorage.getItem("sideline_state");
+  if (s) {
+    try {
+      state = JSON.parse(s);
+    } catch (err) {
+      console.warn("Failed to parse saved state", err);
+    }
+  }
+  normalizeState();
+  recalcAggregateAdjustment();
+}
 function resetAll() {
-  state = { players:[], gameStartTs:null, paused:true, halftimeEndTs:null, scheduledStartTs:null, elapsedAdjustment:0 };
+  state = {
+    players: [],
+    gameStartTs: null,
+    paused: true,
+    breakActive: false,
+    halftimeEndTs: null,
+    scheduledStartTs: null,
+    elapsedAdjustment: 0,
+    gameLengthSec: GAME_LENGTH_MIN * 60,
+    periodCount: 2,
+    periodElapsed: [],
+    periodAdjust: [],
+    periodStoppage: [],
+    currentPeriodIndex: 0,
+    periodStartTs: null
+  };
+  normalizeState();
   subQueue = []; selectedOutName = null; selectedInName = null; selectedSlotIndex = null;
   saveLocal(); renderAll();
 }
 
-function fairnessClass(totalSec) {
-  const delta = totalSec - EQUAL_TARGET_MIN*60;
-  if (delta < -180) return "under";
-  if (delta > 180) return "over";
+function fairnessClass(totalSec, targetSec = targetSecondsPerPlayer()) {
+  const delta = totalSec - targetSec;
+  if (delta <= -FAIRNESS_THRESHOLD) return "under";
+  if (delta >= FAIRNESS_THRESHOLD) return "over";
   return "ok";
 }
 
@@ -301,18 +536,46 @@ function totalLive(p) {
   return (p.totalSec|0) + currentStint(p);
 }
 
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
 /** -------------------------
  *  Navigation & Views
  *  ------------------------- */
 function show(view) {
-  ui.viewSetup.classList.toggle("hidden", view!=="setup");
-  ui.viewLineup.classList.toggle("hidden", view!=="lineup");
-  ui.viewGame.classList.toggle("hidden", view!=="game");
+  const views = {
+    setup: ui.viewSetup,
+    lineup: ui.viewLineup,
+    game: ui.viewGame,
+    reports: ui.viewReports,
+  };
+  Object.entries(views).forEach(([key, el]) => {
+    if (!el) return;
+    el.classList.toggle("hidden", view !== key);
+  });
+  const buttons = {
+    setup: ui.btnSetup,
+    lineup: ui.btnLineup,
+    game: ui.btnGame,
+    reports: ui.btnReports,
+  };
+  Object.entries(buttons).forEach(([key, btn]) => {
+    if (!btn) return;
+    btn.classList.toggle("primary", view === key);
+  });
 }
 
 ui.btnSetup.onclick = () => { show("setup"); };
 ui.btnLineup.onclick = () => { show("lineup"); renderLineup(); };
 ui.btnGame.onclick = () => { show("game"); renderGame(); };
+ui.btnReports.onclick = () => { show("reports"); renderReports(); };
 
 /** -------------------------
  *  Setup
@@ -400,14 +663,57 @@ ui.btnStart.onclick = startGame;
 ui.btnPause.onclick = pauseGame;
 ui.btnHalftime.onclick = startHalftime;
 ui.btnEndHalftime.onclick = endHalftime;
-
-ui.btnAdjust.onclick = () => {
-  const v = parseInt(ui.adjustSec.value, 10);
-  if (isNaN(v)) return;
-  state.elapsedAdjustment = (state.elapsedAdjustment|0) + v;
+ui.btnApplyFormat.onclick = () => {
+  const minutes = parseInt(ui.formatMinutes.value, 10);
+  const periods = parseInt(ui.formatPeriods.value, 10);
+  if (Number.isNaN(minutes) || Number.isNaN(periods)) { alert("Enter minutes and period count."); return; }
+  if (minutes < 10 || minutes > 120) { alert("Minutes must be between 10 and 120."); return; }
+  if (periods < 1 || periods > 4) { alert("Periods must be between 1 and 4."); return; }
+  if (minutes * 60 < periods * 60) { alert("Provide at least one minute per period."); return; }
+  if (state.gameStartTs) { alert("Stop/reset the game before changing the timer format."); return; }
+  state.gameLengthSec = minutes * 60;
+  state.periodCount = periods;
+  ensurePeriodArrays();
+  state.periodElapsed = Array(periods).fill(0);
+  state.periodAdjust = Array(periods).fill(0);
+  state.periodStoppage = Array(periods).fill(0);
+  state.currentPeriodIndex = 0;
+  state.periodStartTs = null;
+  recalcAggregateAdjustment();
   saveLocal();
-  ui.adjustSec.value = "";
-  renderGame();
+  renderAll();
+};
+
+ui.adjustKind.onchange = () => {
+  const isStoppage = ui.adjustKind.value === "stoppage";
+  ui.adjustAll.disabled = isStoppage;
+  if (isStoppage) ui.adjustAll.checked = false;
+};
+
+ui.btnApplyManual.onclick = () => {
+  ensurePeriodArrays();
+  const kind = ui.adjustKind.value;
+  const periodIndex = parseInt(ui.adjustPeriod.value, 10);
+  const seconds = parseInt(ui.adjustSeconds.value, 10);
+  if (Number.isNaN(periodIndex)) { alert("Select a period."); return; }
+  if (Number.isNaN(seconds)) { alert("Enter seconds (integer)."); return; }
+  if (kind === "adjustment") {
+    if (seconds === 0) { alert("Enter a non-zero adjustment."); return; }
+    if (ui.adjustAll.checked) {
+      for (let i = 0; i < state.periodCount; i++) {
+        state.periodAdjust[i] += seconds;
+      }
+    } else {
+      state.periodAdjust[periodIndex] += seconds;
+    }
+    recalcAggregateAdjustment();
+  } else {
+    if (seconds <= 0) { alert("Stoppage time must be positive seconds."); return; }
+    state.periodStoppage[periodIndex] = Math.max(0, state.periodStoppage[periodIndex] + seconds);
+  }
+  ui.adjustSeconds.value = "";
+  saveLocal();
+  renderAll();
 };
 
 /** -------------------------
@@ -494,7 +800,15 @@ ui.btnStartGame.onclick = () => {
       if (p) { p.onField = true; p.position = pos; p.stintStart = n; }
     }
   }
-  if (!state.gameStartTs) state.gameStartTs = n;
+  const firstStart = !state.gameStartTs;
+  if (firstStart) state.gameStartTs = n;
+  ensurePeriodArrays();
+  if (firstStart) {
+    state.currentPeriodIndex = 0;
+    state.periodElapsed = Array(state.periodCount).fill(0);
+  }
+  state.periodStartTs = n;
+  state.breakActive = false;
   state.paused = false;
   saveLocal();
   show("game");
@@ -506,10 +820,19 @@ ui.btnStartGame.onclick = () => {
  *  Game
  *  ------------------------- */
 function startGame() {
+  ensurePeriodArrays();
   const n = nowSec();
-  if (!state.gameStartTs) state.gameStartTs = n;
+  const firstStart = !state.gameStartTs;
+  if (firstStart) {
+    state.gameStartTs = n;
+    state.currentPeriodIndex = 0;
+    state.periodElapsed = Array(state.periodCount).fill(0);
+  }
+  if (!state.periodStartTs || state.paused || state.breakActive) {
+    state.periodStartTs = n;
+  }
+  state.breakActive = false;
   state.paused = false;
-  // resume any paused stints (stintStart null means paused)
   state.players.forEach(p=>{
     if (p.onField && !p.stintStart) p.stintStart = n;
   });
@@ -521,6 +844,11 @@ function startGame() {
 function pauseGame() {
   if (state.paused) return;
   const n = nowSec();
+  ensurePeriodArrays();
+  if (state.periodStartTs) {
+    state.periodElapsed[state.currentPeriodIndex] += Math.max(0, n - state.periodStartTs);
+    state.periodStartTs = null;
+  }
   state.players.forEach(p=>{
     if (p.onField && p.stintStart) {
       p.totalSec += (n - p.stintStart);
@@ -535,6 +863,7 @@ function pauseGame() {
 
 function startHalftime() {
   pauseGame();
+  state.breakActive = true;
   state.halftimeEndTs = nowSec() + Math.floor(HALFTIME_MIN*60);
   saveLocal();
   renderGame();
@@ -542,9 +871,22 @@ function startHalftime() {
 }
 
 function endHalftime() {
+  ensurePeriodArrays();
+  state.breakActive = false;
   state.halftimeEndTs = null;
+  if (state.currentPeriodIndex < state.periodCount - 1) {
+    state.currentPeriodIndex += 1;
+  }
+  const n = nowSec();
+  state.periodStartTs = n;
+  state.paused = false;
+  if (!state.gameStartTs) state.gameStartTs = n;
+  state.players.forEach(p=>{
+    if (p.onField && !p.stintStart) p.stintStart = n;
+  });
   saveLocal();
   renderGame();
+  startTick();
 }
 
 ui.gStart.onclick = startGame;
@@ -552,34 +894,67 @@ ui.gPause.onclick = pauseGame;
 ui.gHalf.onclick = startHalftime;
 ui.gSave.onclick = () => ui.btnSave.click();
 
-function elapsedSeconds() {
-  if (!state.gameStartTs) return 0;
-  const base = nowSec() - state.gameStartTs;
-  return Math.max(0, base + (state.elapsedAdjustment|0));
-}
-
 function renderGame() {
-  // top labels
-  if (state.halftimeEndTs && nowSec() <= state.halftimeEndTs) {
-    const remain = Math.max(0, state.halftimeEndTs - nowSec());
-    ui.clockLabel.textContent = `HALFTIME ${fmtMMSS(remain)}`;
-    ui.halfLabel.style.display = "";
+  ensurePeriodArrays();
+  const elapsed = gameElapsedSeconds();
+  const target = state.gameLengthSec + totalStoppageSeconds();
+  ui.clockLabel.textContent = `${fmtMMSS(elapsed)} / ${fmtMMSS(target)}`;
+  ui.statusLabel.textContent = state.paused ? "PAUSED" : "RUNNING";
+
+  const periodLabel = describePeriodLabel(state.currentPeriodIndex + 1, state.periodCount);
+  ui.periodPill.textContent = `${periodLabel} (${state.currentPeriodIndex + 1}/${state.periodCount})`;
+  ui.metaPill.textContent = `Stoppage ${fmtMMSS(totalStoppageSeconds())} • Adjust ${fmtSignedMMSS(totalAdjustmentSeconds())}`;
+
+  if (state.breakActive) {
+    if (state.halftimeEndTs && nowSec() <= state.halftimeEndTs) {
+      const remain = Math.max(0, state.halftimeEndTs - nowSec());
+      ui.halfLabel.style.display = "";
+      ui.halfLabel.textContent = `BREAK ${fmtMMSS(remain)}`;
+    } else {
+      ui.halfLabel.style.display = "";
+      ui.halfLabel.textContent = "BREAK";
+    }
   } else {
     ui.halfLabel.style.display = "none";
-    ui.clockLabel.textContent = `${fmtMMSS(elapsedSeconds())} / ${fmtMMSS(GAME_LENGTH_MIN*60)}`;
   }
-  ui.statusLabel.textContent = state.paused ? "PAUSED" : "RUNNING";
 
   if (state.scheduledStartTs && !state.gameStartTs) {
     const delta = state.scheduledStartTs - nowSec();
     if (delta > 0) {
-      ui.schedLabel.style.display = ""; ui.schedLabel.textContent = `Starts in ${fmtMMSS(delta)}`;
+      ui.schedLabel.style.display = "";
+      ui.schedLabel.textContent = `Starts in ${fmtMMSS(delta)}`;
     } else {
-      ui.schedLabel.style.display = ""; ui.schedLabel.textContent = `Starting…`;
+      ui.schedLabel.style.display = "";
+      ui.schedLabel.textContent = `Starting…`;
       startGame();
     }
   } else {
     ui.schedLabel.style.display = "none";
+  }
+
+  ui.periodTable.innerHTML = "";
+  const now = nowSec();
+  for (let i = 0; i < state.periodCount; i++) {
+    const running = (i === state.currentPeriodIndex && state.periodStartTs && !state.paused && !state.breakActive)
+      ? Math.max(0, now - state.periodStartTs)
+      : 0;
+    const elapsedReg = (state.periodElapsed[i] || 0) + running;
+    const adjust = state.periodAdjust[i] || 0;
+    const stoppage = state.periodStoppage[i] || 0;
+    const remain = periodRemainingSeconds(i);
+    const tr = document.createElement("tr");
+    if (i === state.currentPeriodIndex && !state.breakActive) {
+      tr.style.fontWeight = "600";
+    }
+    tr.innerHTML = `
+      <td>${describePeriodLabel(i + 1, state.periodCount)}</td>
+      <td>${fmtMMSS(periodRegulationSeconds(i))}</td>
+      <td>${fmtMMSS(elapsedReg)}</td>
+      <td>${fmtSignedMMSS(adjust)}</td>
+      <td>${fmtMMSS(stoppage)}</td>
+      <td>${fmtMMSS(remain)}</td>
+    `;
+    ui.periodTable.appendChild(tr);
   }
 
   // On-field table
@@ -635,6 +1010,8 @@ function renderGame() {
       <button class="btn" onclick="removeQueue(${i})">Remove</button>`;
     ui.queueList.appendChild(li);
   });
+
+  renderReports();
 }
 
 function highlightSelections() {
@@ -693,13 +1070,86 @@ function startTick() {
     // halftime countdown end
     if (state.halftimeEndTs && nowSec() >= state.halftimeEndTs) {
       state.halftimeEndTs = null;
+      state.breakActive = false;
       saveLocal();
       alert("Halftime complete. Press Start/Resume to continue.");
     }
     renderGame();
+    renderReports();
   }, 1000);
 }
 function stopTick(){ if (tickHandle) { clearInterval(tickHandle); tickHandle = null; } }
+
+function renderReports() {
+  if (!ui.reportSummary) return;
+  ensurePeriodArrays();
+
+  const roster = state.players.slice();
+  if (!roster.length) {
+    ui.reportSummary.textContent = "Add players to view analytics.";
+    ui.reportDetail.textContent = "";
+    ui.reportDistribution.textContent = "";
+    ui.reportTargets.textContent = "";
+    ui.reportElapsed.textContent = "";
+    ui.reportTable.innerHTML = "";
+    return;
+  }
+
+  const elapsed = gameElapsedSeconds();
+  const totalTarget = Math.round(targetSecondsTotal());
+  const perPlayerTarget = targetSecondsPerPlayer();
+  const perPlayerRounded = Math.round(perPlayerTarget);
+  const stoppage = totalStoppageSeconds();
+  const adjustments = totalAdjustmentSeconds();
+
+  ui.reportSummary.textContent = `Elapsed ${fmtMMSS(elapsed)} / Target ${fmtMMSS(totalTarget)} — ${roster.length} players`;
+  ui.reportDetail.textContent = `Regulation ${fmtMMSS(state.gameLengthSec)} • Stoppage ${fmtMMSS(stoppage)} • Adjust ${fmtSignedMMSS(adjustments)}`;
+  ui.reportTargets.textContent = `Per player target ${fmtMMSS(perPlayerRounded)}`;
+  ui.reportElapsed.textContent = `Remaining ${fmtMMSS(Math.max(0, totalTarget - elapsed))}`;
+
+  const totals = roster.map(p => totalLive(p));
+  const average = totals.length ? totals.reduce((sum, value) => sum + value, 0) / totals.length : 0;
+  const med = median(totals);
+  const minVal = totals.length ? Math.min(...totals) : 0;
+  const maxVal = totals.length ? Math.max(...totals) : 0;
+  ui.reportDistribution.textContent = `Average ${fmtMMSS(Math.round(average))} • Median ${fmtMMSS(Math.round(med))} • Range ${fmtMMSS(minVal)}–${fmtMMSS(maxVal)}`;
+
+  const fairnessOrder = {under: 0, ok: 1, over: 2};
+  const rows = roster.map(p => {
+    const total = totalLive(p);
+    const delta = Math.round(total - perPlayerTarget);
+    const fairness = fairnessClass(total, perPlayerTarget);
+    const share = perPlayerTarget > 0 ? (total / perPlayerTarget) * 100 : 0;
+    const status = p.onField ? `On Field${p.position ? ` (${p.position})` : ""}` : "Bench";
+    return { player: p, total, delta, fairness, share, status };
+  });
+
+  rows.sort((a, b) => {
+    if (fairnessOrder[a.fairness] !== fairnessOrder[b.fairness]) {
+      return fairnessOrder[a.fairness] - fairnessOrder[b.fairness];
+    }
+    if (a.delta !== b.delta) return a.delta - b.delta;
+    return a.player.name.localeCompare(b.player.name);
+  });
+
+  ui.reportTable.innerHTML = "";
+  rows.forEach(row => {
+    const tr = document.createElement("tr");
+    const preferred = (row.player.preferred || "").toUpperCase();
+    const shareText = `${row.share.toFixed(1)}%`;
+    tr.innerHTML = `
+      <td>${row.player.name}</td>
+      <td>${row.player.number || ""}</td>
+      <td>${preferred}</td>
+      <td>${row.status}</td>
+      <td><span class="fair ${row.fairness}">${fmtMMSS(row.total)}</span></td>
+      <td>${fmtMMSS(perPlayerRounded)}</td>
+      <td><span class="fair ${row.fairness}">${fmtSignedMMSS(row.delta)}</span></td>
+      <td>${shareText}</td>
+    `;
+    ui.reportTable.appendChild(tr);
+  });
+}
 
 /** -------------------------
  *  Setup view secondary render
@@ -713,6 +1163,26 @@ function renderSetup() {
   } else {
     ui.scheduledLabel.textContent = "";
   }
+  ui.formatMinutes.value = Math.round(state.gameLengthSec/60);
+  ui.formatPeriods.value = String(state.periodCount);
+  updatePeriodOptions();
+}
+
+function updatePeriodOptions() {
+  ensurePeriodArrays();
+  ui.adjustPeriod.innerHTML = "";
+  for (let i = 0; i < state.periodCount; i++) {
+    const option = document.createElement("option");
+    option.value = String(i);
+    option.textContent = describePeriodLabel(i + 1, state.periodCount);
+    ui.adjustPeriod.appendChild(option);
+  }
+  if (state.periodCount > 0 && !ui.adjustPeriod.value) {
+    ui.adjustPeriod.value = "0";
+  }
+  if (typeof ui.adjustKind.onchange === "function") {
+    ui.adjustKind.onchange();
+  }
 }
 
 /** -------------------------
@@ -722,6 +1192,7 @@ function renderAll() {
   renderSetup();
   renderLineup();
   renderGame();
+  renderReports();
 }
 loadLocal();
 renderAll();
