@@ -7,9 +7,11 @@ import sys
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from typing import Dict, List, Tuple, Optional
+from datetime import date, datetime
 
-from ..models import GameState, Player
+from ..models import GameState, Player, ContactInfo, MedicalInfo, PlayerStats
 from ..services import AnalyticsService, PersistenceService, TimerService
+from ..services.player_service import PlayerService, PlayerValidationError
 from ..utils import (
     fmt_mmss,
     now_ts,
@@ -61,6 +63,7 @@ class SidelineApp(tk.Tk):
         self.state = GameState()
         self.timer_service = TimerService(self.state)
         self.analytics_service = AnalyticsService(self.state, self.timer_service)
+        self.player_service = PlayerService()
         self.sub_queue: List[Tuple[str, str]] = []  # (out_name, in_name) queued
         self.after_timer = None
 
@@ -78,6 +81,17 @@ class SidelineApp(tk.Tk):
         filem.add_separator()
         filem.add_command(label="Quit", command=self.destroy)
         mbar.add_cascade(label="File", menu=filem)
+
+        playerm = tk.Menu(mbar, tearoff=0)
+        playerm.add_command(label="Manage Players…", command=self.manage_players)
+        playerm.add_separator()
+        playerm.add_command(label="Player Profiles…", command=self.player_profiles)
+        playerm.add_command(label="Update Statistics…", command=self.update_player_stats)
+        playerm.add_command(label="Mark Attendance…", command=self.mark_attendance)
+        playerm.add_separator()
+        playerm.add_command(label="Import Players…", command=self.import_players)
+        playerm.add_command(label="Export Players…", command=self.export_players)
+        mbar.add_cascade(label="Players", menu=playerm)
 
         gamem = tk.Menu(mbar, tearoff=0)
         gamem.add_command(label="Configure Timer…", command=self.configure_timer)
@@ -238,6 +252,14 @@ class SidelineApp(tk.Tk):
         except ValueError as exc:
             messagebox.showerror(APP_TITLE, str(exc))
 
+    def add_quick_stoppage(self, seconds: int):
+        """Add quick stoppage time to current period."""
+        try:
+            self.timer_service.add_stoppage_time(seconds)
+            self.refresh_tables()
+        except ValueError as exc:
+            messagebox.showerror(APP_TITLE, str(exc))
+
     # ---------- Substitution Management ---------- #
     def queue_sub(self, out_name: str, in_name: str):
         # Remove any existing entries for these players
@@ -281,6 +303,123 @@ class SidelineApp(tk.Tk):
 
         self.clear_queue()
         self.refresh_tables()
+
+    # ---------- Player Management ---------- #
+    def manage_players(self):
+        """Open the player management dialog."""
+        dialog = PlayerManagementDialog(self, list(self.state.roster.values()), self.player_service)
+        if dialog.result:
+            # Update the roster with modified players
+            self.state.roster = {p.name: p for p in dialog.result}
+            self.refresh_tables()
+
+    def player_profiles(self):
+        """Open player profiles dialog for detailed player information."""
+        if not self.state.roster:
+            messagebox.showinfo(APP_TITLE, "No players in roster. Create a roster first.")
+            return
+        
+        dialog = PlayerProfileDialog(self, list(self.state.roster.values()), self.player_service)
+        if dialog.result:
+            # Update the roster with modified players
+            for player in dialog.result:
+                self.state.roster[player.name] = player
+            self.refresh_tables()
+
+    def update_player_stats(self):
+        """Open dialog to update player statistics for current game."""
+        if not self.state.roster:
+            messagebox.showinfo(APP_TITLE, "No players in roster. Create a roster first.")
+            return
+        
+        dialog = PlayerStatsDialog(self, list(self.state.roster.values()), self.player_service)
+        if dialog.result:
+            # Update the roster with modified players
+            for player in dialog.result:
+                self.state.roster[player.name] = player
+            self.refresh_tables()
+
+    def mark_attendance(self):
+        """Mark player attendance for today's game."""
+        if not self.state.roster:
+            messagebox.showinfo(APP_TITLE, "No players in roster. Create a roster first.")
+            return
+        
+        dialog = AttendanceDialog(self, list(self.state.roster.values()), self.player_service)
+        if dialog.result:
+            # Update the roster with modified players
+            for player in dialog.result:
+                self.state.roster[player.name] = player
+            self.refresh_tables()
+
+    def import_players(self):
+        """Import players from JSON file."""
+        path = filedialog.askopenfilename(
+            filetypes=[("JSON", "*.json")],
+            title="Import Player Data"
+        )
+        if not path:
+            return
+        
+        try:
+            imported_players = self.player_service.import_player_data(path)
+            
+            # Merge with existing roster (prompt for conflicts)
+            conflicts = []
+            for player in imported_players:
+                if player.name in self.state.roster:
+                    conflicts.append(player.name)
+            
+            if conflicts:
+                result = messagebox.askyesnocancel(
+                    APP_TITLE, 
+                    f"Found {len(conflicts)} players already in roster:\n"
+                    f"{', '.join(conflicts[:5])}"
+                    f"{'...' if len(conflicts) > 5 else ''}\n\n"
+                    f"Yes: Overwrite existing players\n"
+                    f"No: Keep existing players\n"
+                    f"Cancel: Abort import"
+                )
+                
+                if result is None:  # Cancel
+                    return
+                elif result:  # Yes - overwrite
+                    for player in imported_players:
+                        self.state.roster[player.name] = player
+                else:  # No - keep existing
+                    for player in imported_players:
+                        if player.name not in self.state.roster:
+                            self.state.roster[player.name] = player
+            else:
+                # No conflicts, add all players
+                for player in imported_players:
+                    self.state.roster[player.name] = player
+            
+            messagebox.showinfo(APP_TITLE, f"Successfully imported {len(imported_players)} players.")
+            self.refresh_tables()
+            
+        except Exception as e:
+            messagebox.showerror(APP_TITLE, f"Failed to import players: {e}")
+
+    def export_players(self):
+        """Export players to JSON file."""
+        if not self.state.roster:
+            messagebox.showinfo(APP_TITLE, "No players in roster to export.")
+            return
+        
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")],
+            title="Export Player Data"
+        )
+        if not path:
+            return
+        
+        try:
+            self.player_service.export_player_data(list(self.state.roster.values()), path)
+            messagebox.showinfo(APP_TITLE, f"Successfully exported {len(self.state.roster)} players.")
+        except Exception as e:
+            messagebox.showerror(APP_TITLE, f"Failed to export players: {e}")
 
     # ---------- UI Updates ---------- #
     def refresh_tables(self):
@@ -826,6 +965,15 @@ class GameView(ttk.Frame):
         ttk.Button(controls_frame, text="Start", command=self.controller.start_game).pack(side="left", padx=2)
         ttk.Button(controls_frame, text="Pause", command=self.controller.pause_game).pack(side="left", padx=2)
         ttk.Button(controls_frame, text="Halftime", command=self.controller.start_halftime).pack(side="left", padx=2)
+        
+        # Enhanced timer controls
+        ttk.Separator(controls_frame, orient="vertical").pack(side="left", fill="y", padx=5)
+        ttk.Button(controls_frame, text="+1 Min Stoppage", 
+                  command=lambda: self.controller.add_quick_stoppage(60)).pack(side="left", padx=2)
+        ttk.Button(controls_frame, text="+30s Stoppage", 
+                  command=lambda: self.controller.add_quick_stoppage(30)).pack(side="left", padx=2)
+        ttk.Button(controls_frame, text="Time Tools", command=self.controller.open_time_tools).pack(side="left", padx=2)
+        ttk.Button(controls_frame, text="Config", command=self.controller.configure_timer).pack(side="left", padx=2)
 
         status_frame = ttk.Frame(self)
         status_frame.pack(fill="x", padx=10, pady=(0, 5))
@@ -1092,6 +1240,865 @@ class ReportsView(ttk.Frame):
                 ),
                 tags=(summary.fairness,),
             )
+
+
+class PlayerManagementDialog(tk.Toplevel):
+    """Dialog for basic player management (add, edit, delete players)."""
+
+    def __init__(self, parent, players: List[Player], player_service: PlayerService):
+        super().__init__(parent)
+        self.parent = parent
+        self.players = players.copy()  # Work on a copy
+        self.player_service = player_service
+        self.result: Optional[List[Player]] = None
+        
+        self.title("Manage Players")
+        self.geometry("800x600")
+        self.transient(parent)
+        self.grab_set()
+        
+        self._build_ui()
+        self._populate_list()
+        
+    def _build_ui(self):
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Player list with scrollbar
+        list_frame = ttk.LabelFrame(main_frame, text="Players", padding=5)
+        list_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        # Create treeview for player list
+        columns = ("Number", "Preferred", "Age", "Games")
+        self.player_tree = ttk.Treeview(list_frame, columns=columns, show="tree headings")
+        self.player_tree.heading("#0", text="Name")
+        self.player_tree.heading("Number", text="#")
+        self.player_tree.heading("Preferred", text="Positions")
+        self.player_tree.heading("Age", text="Age")
+        self.player_tree.heading("Games", text="Games")
+        
+        self.player_tree.column("#0", width=200)
+        self.player_tree.column("Number", width=60)
+        self.player_tree.column("Preferred", width=120)
+        self.player_tree.column("Age", width=60)
+        self.player_tree.column("Games", width=80)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.player_tree.yview)
+        self.player_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.player_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=5)
+        
+        ttk.Button(button_frame, text="Add Player", command=self._add_player).pack(side="left", padx=(0, 5))
+        ttk.Button(button_frame, text="Edit Player", command=self._edit_player).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="Delete Player", command=self._delete_player).pack(side="left", padx=5)
+        
+        ttk.Button(button_frame, text="Cancel", command=self._cancel).pack(side="right", padx=5)
+        ttk.Button(button_frame, text="Save", command=self._save).pack(side="right")
+        
+    def _populate_list(self):
+        """Populate the player list."""
+        for item in self.player_tree.get_children():
+            self.player_tree.delete(item)
+        
+        for player in self.players:
+            age_str = str(player.age()) if player.age() else ""
+            self.player_tree.insert("", "end", text=player.name, values=(
+                player.number,
+                player.preferred or "",
+                age_str,
+                player.statistics.games_played
+            ))
+    
+    def _add_player(self):
+        """Add a new player."""
+        dialog = PlayerEditDialog(self, None, self.player_service)
+        if dialog.result:
+            # Check for duplicate names
+            if any(p.name == dialog.result.name for p in self.players):
+                messagebox.showerror("Error", f"Player '{dialog.result.name}' already exists.")
+                return
+            
+            self.players.append(dialog.result)
+            self._populate_list()
+    
+    def _edit_player(self):
+        """Edit the selected player."""
+        selection = self.player_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a player to edit.")
+            return
+        
+        item = selection[0]
+        player_name = self.player_tree.item(item, "text")
+        player = next((p for p in self.players if p.name == player_name), None)
+        
+        if player:
+            dialog = PlayerEditDialog(self, player, self.player_service)
+            if dialog.result:
+                # Update player in list
+                index = self.players.index(player)
+                self.players[index] = dialog.result
+                self._populate_list()
+    
+    def _delete_player(self):
+        """Delete the selected player."""
+        selection = self.player_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a player to delete.")
+            return
+        
+        item = selection[0]
+        player_name = self.player_tree.item(item, "text")
+        player = next((p for p in self.players if p.name == player_name), None)
+        
+        if player:
+            if messagebox.askyesno("Confirm Delete", f"Delete player '{player.name}'?"):
+                self.players.remove(player)
+                self._populate_list()
+    
+    def _save(self):
+        """Save changes."""
+        self.result = self.players
+        self.destroy()
+    
+    def _cancel(self):
+        """Cancel changes."""
+        self.destroy()
+
+
+class PlayerEditDialog(tk.Toplevel):
+    """Dialog for editing individual player details."""
+
+    def __init__(self, parent, player: Optional[Player], player_service: PlayerService):
+        super().__init__(parent)
+        self.parent = parent
+        self.player = player
+        self.player_service = player_service
+        self.result: Optional[Player] = None
+        
+        self.title("Edit Player" if player else "Add Player")
+        self.geometry("600x500")
+        self.transient(parent)
+        self.grab_set()
+        
+        self._build_ui()
+        if player:
+            self._load_player_data()
+        
+    def _build_ui(self):
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Basic info
+        basic_frame = ttk.LabelFrame(main_frame, text="Basic Information", padding=5)
+        basic_frame.pack(fill="x", pady=(0, 10))
+        
+        # Name
+        ttk.Label(basic_frame, text="Name:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.name_var = tk.StringVar()
+        ttk.Entry(basic_frame, textvariable=self.name_var, width=30).grid(row=0, column=1, sticky="w")
+        
+        # Number
+        ttk.Label(basic_frame, text="Number:").grid(row=0, column=2, sticky="w", padx=(10, 5))
+        self.number_var = tk.StringVar()
+        ttk.Entry(basic_frame, textvariable=self.number_var, width=5).grid(row=0, column=3, sticky="w")
+        
+        # Date of Birth
+        ttk.Label(basic_frame, text="Date of Birth:").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        self.dob_var = tk.StringVar()
+        ttk.Entry(basic_frame, textvariable=self.dob_var, width=12).grid(row=1, column=1, sticky="w", pady=(5, 0))
+        ttk.Label(basic_frame, text="(YYYY-MM-DD)", foreground="gray").grid(row=1, column=2, sticky="w", padx=(5, 0), pady=(5, 0))
+        
+        # Preferred Positions
+        ttk.Label(basic_frame, text="Preferred Positions:").grid(row=2, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        self.preferred_var = tk.StringVar()
+        ttk.Entry(basic_frame, textvariable=self.preferred_var, width=40).grid(row=2, column=1, columnspan=2, sticky="w", pady=(5, 0))
+        ttk.Label(basic_frame, text="(comma-separated, e.g., GK,DF)", foreground="gray").grid(row=2, column=3, sticky="w", padx=(5, 0), pady=(5, 0))
+        
+        # Contact Info
+        contact_frame = ttk.LabelFrame(main_frame, text="Contact Information", padding=5)
+        contact_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Label(contact_frame, text="Phone:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.phone_var = tk.StringVar()
+        ttk.Entry(contact_frame, textvariable=self.phone_var, width=20).grid(row=0, column=1, sticky="w")
+        
+        ttk.Label(contact_frame, text="Email:").grid(row=0, column=2, sticky="w", padx=(10, 5))
+        self.email_var = tk.StringVar()
+        ttk.Entry(contact_frame, textvariable=self.email_var, width=25).grid(row=0, column=3, sticky="w")
+        
+        ttk.Label(contact_frame, text="Emergency Contact:").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        self.emergency_contact_var = tk.StringVar()
+        ttk.Entry(contact_frame, textvariable=self.emergency_contact_var, width=25).grid(row=1, column=1, sticky="w", pady=(5, 0))
+        
+        ttk.Label(contact_frame, text="Emergency Phone:").grid(row=1, column=2, sticky="w", padx=(10, 5), pady=(5, 0))
+        self.emergency_phone_var = tk.StringVar()
+        ttk.Entry(contact_frame, textvariable=self.emergency_phone_var, width=20).grid(row=1, column=3, sticky="w", pady=(5, 0))
+        
+        # Notes
+        notes_frame = ttk.LabelFrame(main_frame, text="Notes", padding=5)
+        notes_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        self.notes_text = tk.Text(notes_frame, height=6, wrap="word")
+        notes_scrollbar = ttk.Scrollbar(notes_frame, orient="vertical", command=self.notes_text.yview)
+        self.notes_text.configure(yscrollcommand=notes_scrollbar.set)
+        
+        self.notes_text.pack(side="left", fill="both", expand=True)
+        notes_scrollbar.pack(side="right", fill="y")
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=5)
+        
+        ttk.Button(button_frame, text="Cancel", command=self._cancel).pack(side="right", padx=5)
+        ttk.Button(button_frame, text="Save", command=self._save).pack(side="right")
+        
+    def _load_player_data(self):
+        """Load existing player data into the form."""
+        if not self.player:
+            return
+        
+        self.name_var.set(self.player.name)
+        self.number_var.set(self.player.number or "")
+        self.preferred_var.set(self.player.preferred or "")
+        
+        if self.player.date_of_birth:
+            self.dob_var.set(self.player.date_of_birth.isoformat())
+        
+        self.phone_var.set(self.player.contact_info.phone or "")
+        self.email_var.set(self.player.contact_info.email or "")
+        self.emergency_contact_var.set(self.player.contact_info.emergency_contact or "")
+        self.emergency_phone_var.set(self.player.contact_info.emergency_phone or "")
+        
+        if self.player.notes:
+            self.notes_text.insert("1.0", self.player.notes)
+    
+    def _save(self):
+        """Save player data."""
+        try:
+            # Parse date of birth
+            dob = None
+            if self.dob_var.get().strip():
+                try:
+                    dob = date.fromisoformat(self.dob_var.get().strip())
+                except ValueError:
+                    messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+                    return
+            
+            # Create contact info
+            contact_info = ContactInfo(
+                phone=self.phone_var.get().strip() or None,
+                email=self.email_var.get().strip() or None,
+                emergency_contact=self.emergency_contact_var.get().strip() or None,
+                emergency_phone=self.emergency_phone_var.get().strip() or None
+            )
+            
+            # Get notes
+            notes = self.notes_text.get("1.0", "end-1c").strip() or None
+            
+            # Create or update player
+            if self.player:
+                # Update existing player
+                player = Player(
+                    name=self.name_var.get().strip(),
+                    number=self.number_var.get().strip() or "",
+                    preferred=self.preferred_var.get().strip() or "",
+                    total_seconds=self.player.total_seconds,
+                    on_field=self.player.on_field,
+                    position=self.player.position,
+                    stint_start_ts=self.player.stint_start_ts,
+                    date_of_birth=dob,
+                    contact_info=contact_info,
+                    medical_info=self.player.medical_info,  # Preserve existing medical info
+                    skill_ratings=self.player.skill_ratings,  # Preserve existing skill ratings
+                    statistics=self.player.statistics,  # Preserve existing statistics
+                    attendance_history=self.player.attendance_history,  # Preserve existing attendance
+                    notes=notes
+                )
+            else:
+                # Create new player
+                player = self.player_service.create_player(
+                    name=self.name_var.get().strip(),
+                    number=self.number_var.get().strip() or None,
+                    preferred_positions=self.preferred_var.get().strip().split(",") if self.preferred_var.get().strip() else None,
+                    date_of_birth=dob,
+                    contact_info=contact_info,
+                    notes=notes
+                )
+            
+            # Validate
+            errors = self.player_service.validate_player_data(player)
+            if errors:
+                messagebox.showerror("Validation Error", "\n".join(errors))
+                return
+            
+            self.result = player
+            self.destroy()
+            
+        except PlayerValidationError as e:
+            messagebox.showerror("Validation Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save player: {e}")
+    
+    def _cancel(self):
+        """Cancel without saving."""
+        self.destroy()
+
+
+class PlayerProfileDialog(tk.Toplevel):
+    """Dialog for comprehensive player profile management."""
+
+    def __init__(self, parent, players: List[Player], player_service: PlayerService):
+        super().__init__(parent)
+        self.parent = parent
+        self.players = players.copy()
+        self.player_service = player_service
+        self.result: Optional[List[Player]] = None
+        self.current_player_index = 0
+        
+        self.title("Player Profiles")
+        self.geometry("700x600")
+        self.transient(parent)
+        self.grab_set()
+        
+        self._build_ui()
+        if self.players:
+            self._load_current_player()
+        
+    def _build_ui(self):
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Player selection
+        nav_frame = ttk.Frame(main_frame)
+        nav_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Button(nav_frame, text="←", command=self._prev_player).pack(side="left")
+        self.player_label = ttk.Label(nav_frame, text="", font=("TkDefaultFont", 12, "bold"))
+        self.player_label.pack(side="left", padx=10)
+        ttk.Button(nav_frame, text="→", command=self._next_player).pack(side="left")
+        
+        # Notebook for different sections
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill="both", expand=True, pady=(0, 10))
+        
+        # Basic Info Tab
+        self._build_basic_tab()
+        
+        # Skills Tab
+        self._build_skills_tab()
+        
+        # Medical Tab
+        self._build_medical_tab()
+        
+        # Statistics Tab
+        self._build_statistics_tab()
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=5)
+        
+        ttk.Button(button_frame, text="Cancel", command=self._cancel).pack(side="right", padx=5)
+        ttk.Button(button_frame, text="Save All", command=self._save).pack(side="right")
+        
+    def _build_basic_tab(self):
+        """Build basic information tab."""
+        basic_frame = ttk.Frame(self.notebook)
+        self.notebook.add(basic_frame, text="Basic Info")
+        
+        # Basic information (similar to PlayerEditDialog but read-only for some fields)
+        info_frame = ttk.LabelFrame(basic_frame, text="Player Information", padding=10)
+        info_frame.pack(fill="x", padx=10, pady=10)
+        
+        ttk.Label(info_frame, text="Name:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.name_label = ttk.Label(info_frame, text="", font=("TkDefaultFont", 10, "bold"))
+        self.name_label.grid(row=0, column=1, sticky="w")
+        
+        ttk.Label(info_frame, text="Number:").grid(row=1, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        self.number_label = ttk.Label(info_frame, text="")
+        self.number_label.grid(row=1, column=1, sticky="w", pady=(5, 0))
+        
+        ttk.Label(info_frame, text="Age:").grid(row=2, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        self.age_label = ttk.Label(info_frame, text="")
+        self.age_label.grid(row=2, column=1, sticky="w", pady=(5, 0))
+        
+        ttk.Label(info_frame, text="Preferred Positions:").grid(row=3, column=0, sticky="w", padx=(0, 5), pady=(5, 0))
+        self.preferred_label = ttk.Label(info_frame, text="")
+        self.preferred_label.grid(row=3, column=1, sticky="w", pady=(5, 0))
+        
+    def _build_skills_tab(self):
+        """Build skills rating tab."""
+        skills_frame = ttk.Frame(self.notebook)
+        self.notebook.add(skills_frame, text="Skills")
+        
+        skills_label_frame = ttk.LabelFrame(skills_frame, text="Position Skills (1-5 scale)", padding=10)
+        skills_label_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.skill_vars = {}
+        positions = ["GK", "DF", "MF", "ST"]
+        for i, position in enumerate(positions):
+            row = i // 2
+            col = (i % 2) * 2
+            
+            ttk.Label(skills_label_frame, text=f"{position}:").grid(row=row, column=col, sticky="w", padx=(0, 5))
+            var = tk.IntVar()
+            self.skill_vars[position] = var
+            ttk.Spinbox(
+                skills_label_frame, from_=1, to=5, width=5, textvariable=var
+            ).grid(row=row, column=col+1, sticky="w", padx=(0, 20))
+        
+    def _build_medical_tab(self):
+        """Build medical information tab."""
+        medical_frame = ttk.Frame(self.notebook)
+        self.notebook.add(medical_frame, text="Medical")
+        
+        medical_label_frame = ttk.LabelFrame(medical_frame, text="Medical Information", padding=10)
+        medical_label_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Allergies
+        ttk.Label(medical_label_frame, text="Allergies:").pack(anchor="w")
+        self.allergies_text = tk.Text(medical_label_frame, height=3, wrap="word")
+        self.allergies_text.pack(fill="x", pady=(0, 10))
+        
+        # Medications
+        ttk.Label(medical_label_frame, text="Medications:").pack(anchor="w")
+        self.medications_text = tk.Text(medical_label_frame, height=3, wrap="word")
+        self.medications_text.pack(fill="x", pady=(0, 10))
+        
+        # Medical Notes
+        ttk.Label(medical_label_frame, text="Medical Notes:").pack(anchor="w")
+        self.medical_notes_text = tk.Text(medical_label_frame, height=4, wrap="word")
+        self.medical_notes_text.pack(fill="both", expand=True)
+        
+    def _build_statistics_tab(self):
+        """Build statistics display tab."""
+        stats_frame = ttk.Frame(self.notebook)
+        self.notebook.add(stats_frame, text="Statistics")
+        
+        stats_label_frame = ttk.LabelFrame(stats_frame, text="Player Statistics", padding=10)
+        stats_label_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.stats_labels = {}
+        stats_fields = ["Games Played", "Games Started", "Goals", "Assists", "Total Minutes", "Yellow Cards", "Red Cards"]
+        
+        for i, field in enumerate(stats_fields):
+            row = i // 2
+            col = (i % 2) * 2
+            
+            ttk.Label(stats_label_frame, text=f"{field}:").grid(row=row, column=col, sticky="w", padx=(0, 5), pady=2)
+            label = ttk.Label(stats_label_frame, text="0")
+            label.grid(row=row, column=col+1, sticky="w", padx=(0, 20), pady=2)
+            self.stats_labels[field] = label
+        
+    def _load_current_player(self):
+        """Load data for current player."""
+        if not self.players or self.current_player_index >= len(self.players):
+            return
+        
+        player = self.players[self.current_player_index]
+        
+        # Update navigation
+        self.player_label.config(text=f"{player.name} ({self.current_player_index + 1}/{len(self.players)})")
+        
+        # Update basic info
+        self.name_label.config(text=player.name)
+        self.number_label.config(text=player.number or "Not assigned")
+        self.age_label.config(text=str(player.age()) if player.age() else "Not specified")
+        self.preferred_label.config(text=player.preferred or "None specified")
+        
+        # Update skill ratings
+        for position, var in self.skill_vars.items():
+            var.set(player.get_skill_rating(position))
+        
+        # Update medical info
+        self.allergies_text.delete("1.0", "end")
+        if player.medical_info.allergies:
+            self.allergies_text.insert("1.0", "\n".join(player.medical_info.allergies))
+        
+        self.medications_text.delete("1.0", "end")
+        if player.medical_info.medications:
+            self.medications_text.insert("1.0", "\n".join(player.medical_info.medications))
+        
+        self.medical_notes_text.delete("1.0", "end")
+        if player.medical_info.notes:
+            self.medical_notes_text.insert("1.0", player.medical_info.notes)
+        
+        # Update statistics
+        stats = player.statistics
+        self.stats_labels["Games Played"].config(text=str(stats.games_played))
+        self.stats_labels["Games Started"].config(text=str(stats.games_started))
+        self.stats_labels["Goals"].config(text=str(stats.goals))
+        self.stats_labels["Assists"].config(text=str(stats.assists))
+        self.stats_labels["Total Minutes"].config(text=str(stats.total_minutes))
+        self.stats_labels["Yellow Cards"].config(text=str(stats.yellow_cards))
+        self.stats_labels["Red Cards"].config(text=str(stats.red_cards))
+    
+    def _save_current_player(self):
+        """Save changes for current player."""
+        if not self.players or self.current_player_index >= len(self.players):
+            return
+        
+        player = self.players[self.current_player_index]
+        
+        # Update skill ratings
+        for position, var in self.skill_vars.items():
+            player.set_skill_rating(position, var.get())
+        
+        # Update medical info
+        allergies = [a.strip() for a in self.allergies_text.get("1.0", "end-1c").split("\n") if a.strip()]
+        medications = [m.strip() for m in self.medications_text.get("1.0", "end-1c").split("\n") if m.strip()]
+        medical_notes = self.medical_notes_text.get("1.0", "end-1c").strip() or None
+        
+        player.medical_info.allergies = allergies
+        player.medical_info.medications = medications
+        player.medical_info.notes = medical_notes
+    
+    def _prev_player(self):
+        """Navigate to previous player."""
+        if self.players and self.current_player_index > 0:
+            self._save_current_player()
+            self.current_player_index -= 1
+            self._load_current_player()
+    
+    def _next_player(self):
+        """Navigate to next player."""
+        if self.players and self.current_player_index < len(self.players) - 1:
+            self._save_current_player()
+            self.current_player_index += 1
+            self._load_current_player()
+    
+    def _save(self):
+        """Save all changes."""
+        if self.players:
+            self._save_current_player()
+        self.result = self.players
+        self.destroy()
+    
+    def _cancel(self):
+        """Cancel without saving."""
+        self.destroy()
+
+
+class PlayerStatsDialog(tk.Toplevel):
+    """Dialog for updating player statistics for a game."""
+
+    def __init__(self, parent, players: List[Player], player_service: PlayerService):
+        super().__init__(parent)
+        self.parent = parent
+        self.players = players.copy()
+        self.player_service = player_service
+        self.result: Optional[List[Player]] = None
+        
+        self.title("Update Player Statistics")
+        self.geometry("800x500")
+        self.transient(parent)
+        self.grab_set()
+        
+        self._build_ui()
+        self._populate_players()
+        
+    def _build_ui(self):
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Instructions
+        ttk.Label(main_frame, text="Update game statistics for players:", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        # Player stats table
+        table_frame = ttk.Frame(main_frame)
+        table_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        columns = ("Name", "Goals", "Assists", "Shots", "Fouls", "Yellow", "Red")
+        self.stats_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
+        
+        for col in columns:
+            self.stats_tree.heading(col, text=col)
+            if col == "Name":
+                self.stats_tree.column(col, width=200)
+            else:
+                self.stats_tree.column(col, width=80, anchor="center")
+        
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.stats_tree.yview)
+        self.stats_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.stats_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=5)
+        
+        ttk.Button(button_frame, text="Update Player", command=self._update_player).pack(side="left")
+        ttk.Button(button_frame, text="Cancel", command=self._cancel).pack(side="right", padx=5)
+        ttk.Button(button_frame, text="Save All", command=self._save).pack(side="right")
+        
+    def _populate_players(self):
+        """Populate the players list."""
+        for item in self.stats_tree.get_children():
+            self.stats_tree.delete(item)
+        
+        for player in self.players:
+            self.stats_tree.insert("", "end", values=(
+                player.name, "0", "0", "0", "0", "0", "0"
+            ))
+    
+    def _update_player(self):
+        """Update statistics for selected player."""
+        selection = self.stats_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a player to update.")
+            return
+        
+        item = selection[0]
+        current_values = self.stats_tree.item(item, "values")
+        player_name = current_values[0]
+        
+        player = next((p for p in self.players if p.name == player_name), None)
+        if not player:
+            return
+        
+        dialog = SinglePlayerStatsDialog(self, player, self.player_service)
+        if dialog.result:
+            # Update the tree view
+            goals, assists, shots, fouls, yellows, reds = dialog.result
+            self.stats_tree.item(item, values=(
+                player_name, str(goals), str(assists), str(shots), 
+                str(fouls), str(yellows), str(reds)
+            ))
+    
+    def _save(self):
+        """Apply all statistics updates."""
+        for item in self.stats_tree.get_children():
+            values = self.stats_tree.item(item, "values")
+            player_name = values[0]
+            player = next((p for p in self.players if p.name == player_name), None)
+            
+            if player:
+                try:
+                    goals = int(values[1])
+                    assists = int(values[2])
+                    shots = int(values[3])
+                    fouls = int(values[4])
+                    yellows = int(values[5])
+                    reds = int(values[6])
+                    
+                    # Update player statistics
+                    self.player_service.update_player_stats(
+                        player, goals=goals, assists=assists, shots=shots,
+                        fouls_committed=fouls, yellow_cards=yellows, red_cards=reds
+                    )
+                except ValueError:
+                    continue  # Skip invalid entries
+        
+        self.result = self.players
+        self.destroy()
+    
+    def _cancel(self):
+        """Cancel without saving."""
+        self.destroy()
+
+
+class SinglePlayerStatsDialog(simpledialog.Dialog):
+    """Dialog for updating a single player's statistics."""
+
+    def __init__(self, parent, player: Player, player_service: PlayerService):
+        self.player = player
+        self.player_service = player_service
+        self.result = None
+        super().__init__(parent, title=f"Update Stats - {player.name}")
+
+    def body(self, master):
+        frame = ttk.Frame(master)
+        frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        self.vars = {}
+        stats_fields = [
+            ("Goals", "goals"),
+            ("Assists", "assists"),
+            ("Shots", "shots"),
+            ("Fouls Committed", "fouls"),
+            ("Yellow Cards", "yellows"),
+            ("Red Cards", "reds")
+        ]
+        
+        for i, (label, key) in enumerate(stats_fields):
+            ttk.Label(frame, text=f"{label}:").grid(row=i, column=0, sticky="w", padx=(0, 10), pady=2)
+            var = tk.IntVar()
+            self.vars[key] = var
+            ttk.Spinbox(frame, from_=0, to=20, width=5, textvariable=var).grid(row=i, column=1, sticky="w", pady=2)
+        
+        return frame
+
+    def validate(self):
+        return True
+
+    def apply(self):
+        self.result = (
+            self.vars["goals"].get(),
+            self.vars["assists"].get(),
+            self.vars["shots"].get(),
+            self.vars["fouls"].get(),
+            self.vars["yellows"].get(),
+            self.vars["reds"].get()
+        )
+
+
+class AttendanceDialog(tk.Toplevel):
+    """Dialog for marking player attendance."""
+
+    def __init__(self, parent, players: List[Player], player_service: PlayerService):
+        super().__init__(parent)
+        self.parent = parent
+        self.players = players.copy()
+        self.player_service = player_service
+        self.result: Optional[List[Player]] = None
+        self.game_date = date.today()
+        
+        self.title(f"Mark Attendance - {self.game_date}")
+        self.geometry("600x500")
+        self.transient(parent)
+        self.grab_set()
+        
+        self._build_ui()
+        self._populate_attendance()
+        
+    def _build_ui(self):
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Date selection
+        date_frame = ttk.Frame(main_frame)
+        date_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Label(date_frame, text="Game Date:").pack(side="left")
+        self.date_var = tk.StringVar(value=self.game_date.isoformat())
+        ttk.Entry(date_frame, textvariable=self.date_var, width=12).pack(side="left", padx=(5, 10))
+        ttk.Label(date_frame, text="(YYYY-MM-DD)", foreground="gray").pack(side="left")
+        
+        # Attendance list
+        list_frame = ttk.LabelFrame(main_frame, text="Player Attendance", padding=5)
+        list_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        columns = ("Present", "Name", "Reason")
+        self.attendance_tree = ttk.Treeview(list_frame, columns=columns, show="headings")
+        
+        self.attendance_tree.heading("Present", text="Present")
+        self.attendance_tree.heading("Name", text="Player Name")
+        self.attendance_tree.heading("Reason", text="Reason (if absent)")
+        
+        self.attendance_tree.column("Present", width=80, anchor="center")
+        self.attendance_tree.column("Name", width=200)
+        self.attendance_tree.column("Reason", width=200)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.attendance_tree.yview)
+        self.attendance_tree.configure(yscrollcommand=scrollbar.set)
+        
+        self.attendance_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Bind double-click to toggle attendance
+        self.attendance_tree.bind("<Double-1>", self._toggle_attendance)
+        
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=5)
+        
+        ttk.Button(button_frame, text="Mark All Present", command=self._mark_all_present).pack(side="left")
+        ttk.Button(button_frame, text="Mark All Absent", command=self._mark_all_absent).pack(side="left", padx=(5, 0))
+        
+        ttk.Button(button_frame, text="Cancel", command=self._cancel).pack(side="right", padx=5)
+        ttk.Button(button_frame, text="Save", command=self._save).pack(side="right")
+        
+    def _populate_attendance(self):
+        """Populate attendance list with current status."""
+        for item in self.attendance_tree.get_children():
+            self.attendance_tree.delete(item)
+        
+        for player in self.players:
+            # Check if player has attendance record for this date
+            existing_attendance = None
+            for attendance in player.attendance_history:
+                if attendance.date == self.game_date:
+                    existing_attendance = attendance
+                    break
+            
+            if existing_attendance:
+                present_text = "✓" if existing_attendance.present else "✗"
+                reason = existing_attendance.reason or ""
+            else:
+                present_text = "✓"  # Default to present
+                reason = ""
+            
+            self.attendance_tree.insert("", "end", values=(present_text, player.name, reason))
+    
+    def _toggle_attendance(self, event):
+        """Toggle attendance status for selected player."""
+        item = self.attendance_tree.selection()[0] if self.attendance_tree.selection() else None
+        if not item:
+            return
+        
+        values = list(self.attendance_tree.item(item, "values"))
+        is_present = values[0] == "✓"
+        
+        if is_present:
+            # Change to absent, ask for reason
+            reason = simpledialog.askstring("Absence Reason", f"Reason for {values[1]}'s absence:")
+            values[0] = "✗"
+            values[2] = reason or ""
+        else:
+            # Change to present
+            values[0] = "✓"
+            values[2] = ""
+        
+        self.attendance_tree.item(item, values=values)
+    
+    def _mark_all_present(self):
+        """Mark all players as present."""
+        for item in self.attendance_tree.get_children():
+            values = list(self.attendance_tree.item(item, "values"))
+            values[0] = "✓"
+            values[2] = ""
+            self.attendance_tree.item(item, values=values)
+    
+    def _mark_all_absent(self):
+        """Mark all players as absent."""
+        for item in self.attendance_tree.get_children():
+            values = list(self.attendance_tree.item(item, "values"))
+            values[0] = "✗"
+            # Keep existing reason or leave blank
+            self.attendance_tree.item(item, values=values)
+    
+    def _save(self):
+        """Save attendance records."""
+        try:
+            # Parse the date
+            game_date = date.fromisoformat(self.date_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+            return
+        
+        # Update player attendance
+        for item in self.attendance_tree.get_children():
+            values = self.attendance_tree.item(item, "values")
+            player_name = values[1]
+            is_present = values[0] == "✓"
+            reason = values[2].strip() if values[2].strip() else None
+            
+            player = next((p for p in self.players if p.name == player_name), None)
+            if player:
+                self.player_service.mark_attendance(player, game_date, is_present, reason)
+        
+        self.result = self.players
+        self.destroy()
+    
+    def _cancel(self):
+        """Cancel without saving."""
+        self.destroy()
 
 
 def create_tkinter_app() -> SidelineApp:
