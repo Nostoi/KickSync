@@ -245,6 +245,9 @@
         <p class="hint" id="reportElapsed"></p>
       </div>
     </div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button class="btn" id="btnReportExport">Export CSV</button>
+    </div>
     <div class="divider"></div>
     <table id="reportTable">
       <thead>
@@ -464,6 +467,7 @@ let ui = {
   queueList: document.getElementById("queueList"),
 
   // reports
+  btnReportExport: document.getElementById("btnReportExport"),
   reportSummary: document.getElementById("reportSummary"),
   reportDetail: document.getElementById("reportDetail"),
   reportDistribution: document.getElementById("reportDistribution"),
@@ -478,6 +482,7 @@ let selectedOutName = null;    // in-game OUT selection
 let selectedInName = null;     // in-game IN selection
 let subQueue = [];             // [{out,in}]
 let tickHandle = null;
+let latestReportSnapshot = null;
 
 function nowSec() { return Math.floor(Date.now()/1000); }
 function fmtMMSS(sec) { sec = Math.max(0, sec|0); const m = Math.floor(sec/60), s = sec%60; return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`; }
@@ -546,6 +551,189 @@ function median(values) {
   return sorted[mid];
 }
 
+function csvEscape(value) {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function reportSnapshotToCsv(snapshot) {
+  const lines = [];
+  const iso = new Date(snapshot.generatedTs * 1000).toISOString();
+  lines.push(["Sideline Timekeeper Report"]);
+  lines.push(["Generated", iso]);
+  lines.push(["Roster Size", snapshot.rosterSize]);
+  lines.push(["Elapsed Seconds", Math.round(snapshot.elapsed)]);
+  lines.push(["Regulation Seconds", Math.round(snapshot.regulationSeconds)]);
+  lines.push(["Stoppage Seconds", Math.round(snapshot.stoppage)]);
+  lines.push(["Adjustment Seconds", Math.round(snapshot.adjustments)]);
+  lines.push(["Target Seconds Total", Math.round(snapshot.totalTarget)]);
+  lines.push(["Target Seconds Per Player", Math.round(snapshot.perPlayerRounded)]);
+  lines.push(["Average Seconds", Math.round(snapshot.average * 100) / 100]);
+  lines.push(["Median Seconds", Math.round(snapshot.median * 100) / 100]);
+  lines.push(["Minimum Seconds", Math.round(snapshot.min)]);
+  lines.push(["Maximum Seconds", Math.round(snapshot.max)]);
+  const fairnessCounts = snapshot.fairnessCounts || { under: 0, ok: 0, over: 0 };
+  lines.push(["Players Under Target", fairnessCounts.under || 0]);
+  lines.push(["Players On Target", fairnessCounts.ok || 0]);
+  lines.push(["Players Over Target", fairnessCounts.over || 0]);
+  lines.push([]);
+  lines.push([
+    "Name",
+    "Number",
+    "Preferred Positions",
+    "On Field",
+    "Position",
+    "Total Seconds",
+    "Active Stint Seconds",
+    "Cumulative Seconds",
+    "Target Seconds",
+    "Delta Seconds",
+    "Bench Seconds",
+    "Target Share (%)",
+    "Fairness",
+  ]);
+
+  snapshot.rows.forEach((row) => {
+    lines.push([
+      row.name,
+      row.number,
+      row.preferredList.join(", "),
+      row.onField ? "yes" : "no",
+      row.position,
+      row.totalSeconds,
+      row.activeSeconds,
+      row.cumulativeSeconds,
+      row.targetSeconds,
+      row.deltaSeconds,
+      row.benchSeconds,
+      Math.round(row.targetSharePercent * 100) / 100,
+      row.fairness,
+    ]);
+  });
+
+  return lines.map((line) => line.map(csvEscape).join(",")).join("\n") + "\n";
+}
+
+function buildReportSnapshot() {
+  ensurePeriodArrays();
+  const roster = state.players.slice();
+  if (!roster.length) {
+    latestReportSnapshot = null;
+    return null;
+  }
+
+  const generatedTs = nowSec();
+  const elapsed = gameElapsedSeconds();
+  const totalTarget = targetSecondsTotal();
+  const perPlayerTarget = targetSecondsPerPlayer();
+  const perPlayerRounded = Math.round(perPlayerTarget);
+  const stoppage = totalStoppageSeconds();
+  const adjustments = totalAdjustmentSeconds();
+  const regulation = state.gameLengthSec;
+  const totals = roster.map(totalLive);
+  const average = totals.length
+    ? totals.reduce((sum, value) => sum + value, 0) / totals.length
+    : 0;
+  const med = median(totals);
+  const minVal = totals.length ? Math.min(...totals) : 0;
+  const maxVal = totals.length ? Math.max(...totals) : 0;
+  const fairnessOrder = { under: 0, ok: 1, over: 2 };
+
+  const rows = roster.map((player) => {
+    const preferredList = (player.preferred || "")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length);
+    const total = totalLive(player);
+    const delta = Math.round(total - perPlayerTarget);
+    const fairness = fairnessClass(total, perPlayerTarget);
+    const share = perPlayerTarget > 0 ? (total / perPlayerTarget) * 100 : 0;
+    const status = player.onField
+      ? `On Field${player.position ? ` (${player.position})` : ""}`
+      : "Bench";
+    const benchSeconds = Math.max(0, elapsed - total);
+    const activeSeconds = currentStint(player);
+    return {
+      name: player.name,
+      number: player.number || "",
+      preferredList,
+      preferredDisplay: preferredList.join(", "),
+      onField: !!player.onField,
+      position: player.position || "",
+      totalSeconds: Math.max(0, player.totalSec | 0),
+      activeSeconds,
+      cumulativeSeconds: total,
+      targetSeconds: perPlayerRounded,
+      deltaSeconds: delta,
+      benchSeconds,
+      targetSharePercent: share,
+      fairness,
+      status,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (fairnessOrder[a.fairness] !== fairnessOrder[b.fairness]) {
+      return fairnessOrder[a.fairness] - fairnessOrder[b.fairness];
+    }
+    if (a.deltaSeconds !== b.deltaSeconds) {
+      return a.deltaSeconds - b.deltaSeconds;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  const fairnessCounts = { under: 0, ok: 0, over: 0 };
+  rows.forEach((row) => {
+    const key = row.fairness;
+    fairnessCounts[key] = (fairnessCounts[key] || 0) + 1;
+  });
+
+  latestReportSnapshot = {
+    generatedTs,
+    rosterSize: roster.length,
+    elapsed,
+    totalTarget,
+    perPlayerTarget,
+    perPlayerRounded,
+    stoppage,
+    adjustments,
+    regulationSeconds: regulation,
+    average,
+    median: med,
+    min: minVal,
+    max: maxVal,
+    rows,
+    fairnessCounts,
+  };
+  return latestReportSnapshot;
+}
+
+function downloadReportCsv() {
+  const snapshot = buildReportSnapshot();
+  if (!snapshot) {
+    alert("Add players before exporting analytics.");
+    return;
+  }
+
+  const csv = reportSnapshotToCsv(snapshot);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date(snapshot.generatedTs * 1000)
+    .toISOString()
+    .replace(/[:.]/g, "-");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `sideline_report_${stamp}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 /** -------------------------
  *  Navigation & Views
  *  ------------------------- */
@@ -576,6 +764,7 @@ ui.btnSetup.onclick = () => { show("setup"); };
 ui.btnLineup.onclick = () => { show("lineup"); renderLineup(); };
 ui.btnGame.onclick = () => { show("game"); renderGame(); };
 ui.btnReports.onclick = () => { show("reports"); renderReports(); };
+if (ui.btnReportExport) ui.btnReportExport.onclick = downloadReportCsv;
 
 /** -------------------------
  *  Setup
@@ -1082,10 +1271,9 @@ function stopTick(){ if (tickHandle) { clearInterval(tickHandle); tickHandle = n
 
 function renderReports() {
   if (!ui.reportSummary) return;
-  ensurePeriodArrays();
+  const snapshot = buildReportSnapshot();
 
-  const roster = state.players.slice();
-  if (!roster.length) {
+  if (!snapshot) {
     ui.reportSummary.textContent = "Add players to view analytics.";
     ui.reportDetail.textContent = "";
     ui.reportDistribution.textContent = "";
@@ -1095,56 +1283,39 @@ function renderReports() {
     return;
   }
 
-  const elapsed = gameElapsedSeconds();
-  const totalTarget = Math.round(targetSecondsTotal());
-  const perPlayerTarget = targetSecondsPerPlayer();
-  const perPlayerRounded = Math.round(perPlayerTarget);
-  const stoppage = totalStoppageSeconds();
-  const adjustments = totalAdjustmentSeconds();
+  const elapsedRounded = Math.round(snapshot.elapsed);
+  const totalTargetRounded = Math.round(snapshot.totalTarget);
+  const regulationRounded = Math.round(snapshot.regulationSeconds);
+  const stoppageRounded = Math.round(snapshot.stoppage);
+  const adjustmentsRounded = Math.round(snapshot.adjustments);
+  const remaining = Math.max(0, totalTargetRounded - elapsedRounded);
 
-  ui.reportSummary.textContent = `Elapsed ${fmtMMSS(elapsed)} / Target ${fmtMMSS(totalTarget)} — ${roster.length} players`;
-  ui.reportDetail.textContent = `Regulation ${fmtMMSS(state.gameLengthSec)} • Stoppage ${fmtMMSS(stoppage)} • Adjust ${fmtSignedMMSS(adjustments)}`;
-  ui.reportTargets.textContent = `Per player target ${fmtMMSS(perPlayerRounded)}`;
-  ui.reportElapsed.textContent = `Remaining ${fmtMMSS(Math.max(0, totalTarget - elapsed))}`;
+  ui.reportSummary.textContent = `Elapsed ${fmtMMSS(elapsedRounded)} / Target ${fmtMMSS(totalTargetRounded)} — ${snapshot.rosterSize} players`;
+  ui.reportDetail.textContent = `Regulation ${fmtMMSS(regulationRounded)} • Stoppage ${fmtMMSS(stoppageRounded)} • Adjust ${fmtSignedMMSS(adjustmentsRounded)}`;
+  ui.reportTargets.textContent = `Per player target ${fmtMMSS(snapshot.perPlayerRounded)}`;
+  ui.reportElapsed.textContent = `Remaining ${fmtMMSS(remaining)}`;
 
-  const totals = roster.map(p => totalLive(p));
-  const average = totals.length ? totals.reduce((sum, value) => sum + value, 0) / totals.length : 0;
-  const med = median(totals);
-  const minVal = totals.length ? Math.min(...totals) : 0;
-  const maxVal = totals.length ? Math.max(...totals) : 0;
-  ui.reportDistribution.textContent = `Average ${fmtMMSS(Math.round(average))} • Median ${fmtMMSS(Math.round(med))} • Range ${fmtMMSS(minVal)}–${fmtMMSS(maxVal)}`;
-
-  const fairnessOrder = {under: 0, ok: 1, over: 2};
-  const rows = roster.map(p => {
-    const total = totalLive(p);
-    const delta = Math.round(total - perPlayerTarget);
-    const fairness = fairnessClass(total, perPlayerTarget);
-    const share = perPlayerTarget > 0 ? (total / perPlayerTarget) * 100 : 0;
-    const status = p.onField ? `On Field${p.position ? ` (${p.position})` : ""}` : "Bench";
-    return { player: p, total, delta, fairness, share, status };
-  });
-
-  rows.sort((a, b) => {
-    if (fairnessOrder[a.fairness] !== fairnessOrder[b.fairness]) {
-      return fairnessOrder[a.fairness] - fairnessOrder[b.fairness];
-    }
-    if (a.delta !== b.delta) return a.delta - b.delta;
-    return a.player.name.localeCompare(b.player.name);
-  });
+  const fairness = snapshot.fairnessCounts || { under: 0, ok: 0, over: 0 };
+  const fairnessParts = [
+    `${fairness.under || 0} under`,
+    `${fairness.ok || 0} on target`,
+    `${fairness.over || 0} over`,
+  ];
+  ui.reportDistribution.textContent = `Average ${fmtMMSS(Math.round(snapshot.average))} • Median ${fmtMMSS(Math.round(snapshot.median))} • Range ${fmtMMSS(Math.round(snapshot.min))}–${fmtMMSS(Math.round(snapshot.max))} • Fairness ${fairnessParts.join(" / ")}`;
 
   ui.reportTable.innerHTML = "";
-  rows.forEach(row => {
+  snapshot.rows.forEach((row) => {
     const tr = document.createElement("tr");
-    const preferred = (row.player.preferred || "").toUpperCase();
-    const shareText = `${row.share.toFixed(1)}%`;
+    const preferred = row.preferredDisplay || "—";
+    const shareText = `${row.targetSharePercent.toFixed(1)}%`;
     tr.innerHTML = `
-      <td>${row.player.name}</td>
-      <td>${row.player.number || ""}</td>
+      <td>${row.name}</td>
+      <td>${row.number}</td>
       <td>${preferred}</td>
       <td>${row.status}</td>
-      <td><span class="fair ${row.fairness}">${fmtMMSS(row.total)}</span></td>
-      <td>${fmtMMSS(perPlayerRounded)}</td>
-      <td><span class="fair ${row.fairness}">${fmtSignedMMSS(row.delta)}</span></td>
+      <td><span class="fair ${row.fairness}">${fmtMMSS(Math.round(row.cumulativeSeconds))}</span></td>
+      <td>${fmtMMSS(snapshot.perPlayerRounded)}</td>
+      <td><span class="fair ${row.fairness}">${fmtSignedMMSS(Math.round(row.deltaSeconds))}</span></td>
       <td>${shareText}</td>
     `;
     ui.reportTable.appendChild(tr);
