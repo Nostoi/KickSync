@@ -49,7 +49,7 @@ python run_desktop.py
 **Web Application:**
 ```bash
 python run_web.py
-# Then open http://127.0.0.1:5000
+# Then open http://127.0.0.1:7122
 ```
 
 ### Legacy Entry Points (Backward Compatibility)
@@ -62,7 +62,7 @@ python coach_timer.py
 **Web Application:**
 ```bash
 python app.py
-# Then open http://127.0.0.1:5000
+# Then open http://127.0.0.1:7122
 ```
 
 ## What Changed
