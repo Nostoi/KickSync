@@ -1135,6 +1135,7 @@ class ReportsView(ttk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        self._latest_report = None
         self._build_ui()
 
     def _build_ui(self):
@@ -1143,6 +1144,7 @@ class ReportsView(ttk.Frame):
         ttk.Button(header, text="← Back to Home", command=self.controller.show_home).pack(side="left")
         ttk.Label(header, text="Playing Time Analytics", font=("Arial", 16, "bold")).pack(side="left", padx=10)
         ttk.Button(header, text="Go to Game", command=self.controller.show_game).pack(side="right")
+        ttk.Button(header, text="Export CSV…", command=self.export_csv).pack(side="right", padx=5)
 
         summary_frame = ttk.LabelFrame(self, text="Summary", padding=10)
         summary_frame.pack(fill="x", padx=10, pady=5)
@@ -1190,6 +1192,7 @@ class ReportsView(ttk.Frame):
 
     def refresh(self):
         report = self.controller.analytics_service.generate_game_report()
+        self._latest_report = report
         if report.roster_size == 0:
             self.summary_label.config(text="Add players to see analytics.")
             self.detail_label.config(text="")
@@ -1216,6 +1219,14 @@ class ReportsView(ttk.Frame):
             f"Median {fmt_mmss(int(round(report.median_seconds)))}",
             f"Range {fmt_mmss(report.min_seconds)}–{fmt_mmss(report.max_seconds)}",
         ]
+        fairness_counts = report.fairness_counts or {}
+        fairness_text = (
+            "Fairness "
+            f"{fairness_counts.get('under', 0)} under / "
+            f"{fairness_counts.get('ok', 0)} on target / "
+            f"{fairness_counts.get('over', 0)} over"
+        )
+        distribution.append(fairness_text)
         self.distribution_label.config(text=" • ".join(distribution))
 
         self.tree.delete(*self.tree.get_children())
@@ -1240,6 +1251,30 @@ class ReportsView(ttk.Frame):
                 ),
                 tags=(summary.fairness,),
             )
+
+    def export_csv(self) -> None:
+        """Prompt the user to save the latest analytics report as a CSV file."""
+
+        report = self._latest_report or self.controller.analytics_service.generate_game_report()
+        if report.roster_size == 0:
+            messagebox.showinfo(APP_TITLE, "Add players before exporting analytics.")
+            return
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            title="Export Playing Time Report",
+        )
+        if not path:
+            return
+
+        try:
+            csv_text = self.controller.analytics_service.generate_report_csv(report)
+            with open(path, "w", encoding="utf-8", newline="") as handle:
+                handle.write(csv_text)
+            messagebox.showinfo(APP_TITLE, "Report exported successfully.")
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, f"Failed to export report: {exc}")
 
 
 class PlayerManagementDialog(tk.Toplevel):

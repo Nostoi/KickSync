@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import datetime as dt
+import io
 import statistics
+from collections import Counter
 from typing import List, Optional
 
 from ..models import GameReport, GameState, Player, PlayerTimeSummary
@@ -94,6 +98,15 @@ class AnalyticsService:
             )
         )
         totals = [summary.cumulative_seconds for summary in summaries]
+        fairness_counter = Counter(summary.fairness for summary in summaries)
+        fairness_counts = {
+            "under": fairness_counter.get("under", 0),
+            "ok": fairness_counter.get("ok", 0),
+            "over": fairness_counter.get("over", 0),
+        }
+        for label, value in fairness_counter.items():
+            if label not in fairness_counts:
+                fairness_counts[label] = value
 
         average_seconds = statistics.mean(totals) if totals else 0.0
         median_seconds = statistics.median(totals) if totals else 0.0
@@ -114,7 +127,95 @@ class AnalyticsService:
             median_seconds=median_seconds,
             min_seconds=min_seconds,
             max_seconds=max_seconds,
+            fairness_counts=fairness_counts,
         )
+
+    def generate_report_csv(self, report: Optional[GameReport] = None) -> str:
+        """Return a CSV document describing the current playing time report.
+
+        Args:
+            report: Optional pre-generated :class:`GameReport` snapshot. When
+                omitted the method generates a fresh report using the attached
+                :class:`TimerService`.
+
+        Returns:
+            CSV formatted string containing summary information followed by a
+            table of player level metrics.
+
+        Raises:
+            ValueError: If there are no players to include in the report.
+        """
+
+        report = report or self.generate_game_report()
+        if report.roster_size == 0:
+            raise ValueError("Cannot export analytics without any players")
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+
+        generated_dt = dt.datetime.fromtimestamp(report.generated_ts)
+        writer.writerow(["Sideline Timekeeper Report"])
+        writer.writerow(["Generated", generated_dt.isoformat(timespec="seconds")])
+        writer.writerow(["Roster Size", report.roster_size])
+        writer.writerow(["Elapsed Seconds", report.elapsed_seconds])
+        writer.writerow(["Regulation Seconds", report.regulation_seconds])
+        writer.writerow(["Stoppage Seconds", report.stoppage_seconds])
+        writer.writerow(["Adjustment Seconds", report.adjustment_seconds])
+        writer.writerow(["Target Seconds Total", report.target_seconds_total])
+        writer.writerow(["Target Seconds Per Player", report.target_seconds_per_player])
+        writer.writerow(["Average Seconds", round(report.average_seconds, 2)])
+        writer.writerow(["Median Seconds", round(report.median_seconds, 2)])
+        writer.writerow(["Minimum Seconds", report.min_seconds])
+        writer.writerow(["Maximum Seconds", report.max_seconds])
+
+        fairness_counts = report.fairness_counts or {}
+        writer.writerow(["Players Under Target", fairness_counts.get("under", 0)])
+        writer.writerow(["Players On Target", fairness_counts.get("ok", 0)])
+        writer.writerow(["Players Over Target", fairness_counts.get("over", 0)])
+        writer.writerow([])
+
+        writer.writerow(
+            [
+                "Name",
+                "Number",
+                "Preferred Positions",
+                "On Field",
+                "Position",
+                "Total Seconds",
+                "Active Stint Seconds",
+                "Cumulative Seconds",
+                "Target Seconds",
+                "Delta Seconds",
+                "Bench Seconds",
+                "Target Share (%)",
+                "Fairness",
+            ]
+        )
+
+        for summary in report.players:
+            preferred = ", ".join(summary.preferred_positions)
+            share_percent = round(summary.target_share * 100, 2)
+            writer.writerow(
+                [
+                    summary.name,
+                    summary.number or "",
+                    preferred,
+                    "yes" if summary.on_field else "no",
+                    summary.position or "",
+                    summary.total_seconds,
+                    summary.active_stint_seconds,
+                    summary.cumulative_seconds,
+                    summary.target_seconds,
+                    summary.delta_seconds,
+                    summary.bench_seconds,
+                    share_percent,
+                    summary.fairness,
+                ]
+            )
+
+        csv_text = buffer.getvalue()
+        buffer.close()
+        return csv_text
 
     @staticmethod
     def _classify_fairness(delta_seconds: int) -> str:
@@ -123,3 +224,4 @@ class AnalyticsService:
         if delta_seconds >= FAIRNESS_THRESHOLD_SECONDS:
             return "over"
         return "ok"
+

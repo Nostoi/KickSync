@@ -1,7 +1,7 @@
 """Dataclasses representing analytics reports for the timekeeper app."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -40,3 +40,4 @@ class GameReport:
     median_seconds: float = 0.0
     min_seconds: int = 0
     max_seconds: int = 0
+    fairness_counts: Dict[str, int] = field(default_factory=dict)
