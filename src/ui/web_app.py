@@ -109,6 +109,7 @@ def create_app(static_folder: str = ".") -> Flask:
             "in_break": in_break,
             "total_stoppage_seconds": config["total_stoppage_seconds"],
             "total_adjustment_seconds": config["total_adjustment_seconds"],
+            "field_size": app_state.game_state.field_size,
         }
     
     def _build_player_data(report) -> List[dict]:
