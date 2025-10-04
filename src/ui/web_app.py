@@ -218,8 +218,8 @@ def create_app(static_folder: str = ".") -> Flask:
             if not app_state.game_state.roster:
                 validation_errors.append("No players in roster")
                 print("DEBUG: Validation error - No players in roster")
-            elif len(app_state.game_state.roster) < 11:
-                validation_errors.append(f"Need at least 11 players, only {len(app_state.game_state.roster)} in roster")
+            elif len(app_state.game_state.roster) < app_state.game_state.field_size:
+                validation_errors.append(f"Need at least {app_state.game_state.field_size} players, only {len(app_state.game_state.roster)} in roster")
                 print(f"DEBUG: Validation error - Not enough players: {len(app_state.game_state.roster)}")
             
             # Validate starting lineup if formation is specified
@@ -286,7 +286,7 @@ def create_app(static_folder: str = ".") -> Flask:
                     "validation_errors": validation_errors,
                     "warnings": warnings,
                     "suggestions": [
-                        "Ensure you have at least 11 players in your roster",
+                        f"Ensure you have at least {app_state.game_state.field_size} players in your roster",
                         "Complete your starting formation with all positions filled",
                         "Assign a goalkeeper to your lineup",
                         "Check that player assignments are valid"
@@ -456,6 +456,7 @@ def create_app(static_folder: str = ".") -> Flask:
         try:
             data = request.get_json()
             players_data = data.get("players", [])
+            field_size = data.get("field_size", 11)  # Default to 11 for backward compatibility
             
             roster = {}
             for player_data in players_data:
@@ -485,7 +486,7 @@ def create_app(static_folder: str = ".") -> Flask:
                 
                 roster[player.name] = player
             
-            app_state.game_state = GameState(roster=roster)
+            app_state.game_state = GameState(roster=roster, field_size=field_size)
             app_state.reset_services()
             
             return jsonify({"success": True, "message": f"Roster updated with {len(roster)} players"})
@@ -1120,7 +1121,7 @@ def create_app(static_folder: str = ".") -> Flask:
                     "success": False,
                     "errors": validation_result.errors,
                     "suggestions": [
-                        "Ensure formation has exactly 11 positions",
+                        f"Ensure formation has exactly {app_state.game_state.field_size} positions",
                         "Include exactly 1 goalkeeper",
                         "Check that all positions are properly placed",
                         "Verify player assignments are valid"
@@ -1217,12 +1218,15 @@ def create_app(static_folder: str = ".") -> Flask:
         """Suggest optimal formation based on available players."""
         try:
             available_players = list(app_state.game_state.roster.values())
-            suggested = app_state.strategy_service.suggest_optimal_formation(available_players)
+            suggested = app_state.strategy_service.suggest_optimal_formation(
+                available_players, 
+                app_state.game_state.field_size
+            )
             
             if not suggested:
                 return jsonify({
                     "success": False, 
-                    "error": "Unable to suggest formation. Need at least 11 players."
+                    "error": f"Unable to suggest formation. Need at least {app_state.game_state.field_size} players."
                 }), 400
             
             return jsonify({
@@ -1425,7 +1429,7 @@ def create_app(static_folder: str = ".") -> Flask:
             if not can_start_game:
                 suggestions = []
                 if assigned < total:
-                    suggestions.append("Assign players to all 11 positions")
+                    suggestions.append(f"Assign players to all {app_state.game_state.field_size} positions")
                 if "Goalkeeper" in missing_types:
                     suggestions.append("Assign a goalkeeper")
                 if len(missing_types) > 1:

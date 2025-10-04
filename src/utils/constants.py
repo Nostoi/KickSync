@@ -29,8 +29,16 @@ GAME_LENGTH_MIN = DEFAULT_GAME_LENGTH_MIN
 EQUAL_TIME_TARGET_MIN = 30
 HALFTIME_PAUSE_MIN = 10.5
 
-# Position configuration
-POSITIONS = ["GK", "DF", "DF", "DF", "MF", "MF", "ST", "ST", "ST"]  # required on-field slots
+# Field size configuration (flexible for different youth soccer formats)
+MIN_FIELD_SIZE = 7   # Minimum players on field (e.g., 7v7 for U8-U10)
+MAX_FIELD_SIZE = 11  # Maximum players on field (standard 11v11)
+DEFAULT_FIELD_SIZE = 11  # Default to standard soccer
+
+# Supported field sizes with common formats
+SUPPORTED_FIELD_SIZES = [7, 9, 10, 11]
+
+# Position configuration (deprecated - now dynamically configured per game)
+POSITIONS = ["GK", "DF", "DF", "DF", "MF", "MF", "ST", "ST", "ST"]  # legacy 9-player default
 POS_SHORT_TO_FULL = {
     "GK": "Goalkeeper",
     "DF": "Defender",

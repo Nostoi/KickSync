@@ -49,17 +49,22 @@ class ValidationRule(ABC):
 class FormationStructureValidator(ValidationRule):
     """Validates basic formation structure requirements."""
     
-    def validate(self, formation: Formation) -> ValidationResult:
-        """Validate formation structure."""
+    def __init__(self, field_size: int = 11):
+        """Initialize with expected field size (7, 9, 10, or 11)."""
+        self.field_size = field_size
+    
+    def validate(self, formation: Formation, field_size: Optional[int] = None) -> ValidationResult:
+        """Validate formation structure for specified field size."""
         result = ValidationResult()
+        expected_size = field_size if field_size is not None else self.field_size
         
         # Check formation name
         if not formation.name or not formation.name.strip():
             result.add_error("Formation name cannot be empty")
         
-        # Check position count (must be exactly 11 for soccer)
-        if len(formation.positions) != 11:
-            result.add_error(f"Formation must have exactly 11 positions, found {len(formation.positions)}")
+        # Check position count (must match field size)
+        if len(formation.positions) != expected_size:
+            result.add_error(f"Formation must have exactly {expected_size} positions, found {len(formation.positions)}")
         
         # Check for goalkeeper
         gk_positions = [p for p in formation.positions if p.position_code == Position.GOALKEEPER]
@@ -198,9 +203,10 @@ class PlayerAssignmentValidator(ValidationRule):
 class GameStateValidator(ValidationRule):
     """Validates formation against current game state."""
     
-    def __init__(self, is_game_active: bool = False, substitutions_made: int = 0):
+    def __init__(self, is_game_active: bool = False, substitutions_made: int = 0, field_size: int = 11):
         self.is_game_active = is_game_active
         self.substitutions_made = substitutions_made
+        self.field_size = field_size
     
     def validate(self, formation: Formation) -> ValidationResult:
         """Validate formation against game state."""
@@ -212,7 +218,7 @@ class GameStateValidator(ValidationRule):
         
         # Check substitution limits (FIFA allows 5 substitutions in normal play)
         assigned_count = len([p for p in formation.positions if p.player_name])
-        if assigned_count < 11 and self.substitutions_made >= 5:
+        if assigned_count < self.field_size and self.substitutions_made >= 5:
             result.add_error("Maximum substitutions reached (5/5)")
         
         return result
@@ -339,15 +345,16 @@ class LineupEdgeCaseHandler:
     Provides user-friendly error messages and recovery suggestions.
     """
     
-    def __init__(self, validation_service: FormationValidationService):
+    def __init__(self, validation_service: FormationValidationService, field_size: int = 11):
         self.validation_service = validation_service
+        self.field_size = field_size
     
     def handle_formation_creation_error(self, error_type: str, details: str = "") -> Dict[str, any]:
         """Handle formation creation errors with user-friendly messages."""
         error_messages = {
             "empty_name": "Please enter a formation name before saving.",
             "duplicate_name": f"A formation named '{details}' already exists. Please choose a different name.",
-            "invalid_positions": "Formation must have exactly 11 positions with 1 goalkeeper.",
+            "invalid_positions": f"Formation must have exactly {self.field_size} positions with 1 goalkeeper.",
             "invalid_coordinates": "Player positions must be within the field boundaries.",
             "network_error": "Unable to save formation. Please check your connection and try again.",
             "permission_error": "Unable to save formation data. Check file permissions."
@@ -382,7 +389,7 @@ class LineupEdgeCaseHandler:
             "empty_name": ["Enter a descriptive name for your formation"],
             "duplicate_name": ["Try adding a suffix like '(v2)' or use a different name"],
             "invalid_positions": [
-                "Ensure you have exactly 11 positions",
+                f"Ensure you have exactly {self.field_size} positions",
                 "Check that you have selected 1 goalkeeper",
                 "Verify all positions are placed on the field"
             ],

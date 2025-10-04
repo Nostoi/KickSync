@@ -55,6 +55,8 @@ class GameState:
     current_formation: Optional[Formation] = None
     starting_formation: Optional[Formation] = None
     opponent_notes: str = ""
+    # field configuration
+    field_size: int = 11  # Number of players on field (7, 9, 10, or 11)
 
     def to_json(self) -> dict:
         """
@@ -79,6 +81,7 @@ class GameState:
             "current_period_index": self.current_period_index,
             "period_start_ts": self.period_start_ts,
             "opponent_notes": self.opponent_notes,
+            "field_size": self.field_size,
         }
         
         # Add formation data if present
@@ -137,6 +140,7 @@ class GameState:
 
         # Load formation data
         gs.opponent_notes = data.get("opponent_notes", "")
+        gs.field_size = int(data.get("field_size", 11))  # Default to 11 for backward compatibility
         
         # Load formations if present
         if "current_formation" in data and data["current_formation"]:

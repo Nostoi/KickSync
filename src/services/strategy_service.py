@@ -118,17 +118,18 @@ class StrategyService:
         
         return formation
     
-    def suggest_optimal_formation(self, available_players: List[Player]) -> Optional[Formation]:
+    def suggest_optimal_formation(self, available_players: List[Player], field_size: int = 11) -> Optional[Formation]:
         """
         Suggest optimal formation based on available players and their positions.
         
         Args:
             available_players: List of available players
+            field_size: Number of players per team (7, 9, 10, or 11)
             
         Returns:
             Recommended formation or None if can't determine
         """
-        if len(available_players) < 11:
+        if len(available_players) < field_size:
             return None
         
         # Count players by preferred position

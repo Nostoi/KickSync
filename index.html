@@ -147,6 +147,16 @@
       <div>
         <label class="hint">Enter one per line: <b>Name[,Number][,Preferred (e.g. ST,MF)]</b></label>
         <textarea id="rosterInput" placeholder="Alice,10,ST&#10;Ben,7,MF,DF&#10;Casey,22,DF&#10;..."></textarea>
+        <div class="row" style="margin-top:8px">
+          <label>Field Size:</label>
+          <select id="fieldSizeSelect" style="max-width:140px">
+            <option value="7">7v7</option>
+            <option value="9">9v9</option>
+            <option value="10">10v10</option>
+            <option value="11" selected>11v11 (Standard)</option>
+          </select>
+          <span class="hint" style="margin-left:8px">Select players per team</span>
+        </div>
         <div class="row">
           <button class="btn" id="btnExample">Use Example 17-Player Roster</button>
           <button class="btn primary" id="btnLoadRoster">Apply Roster</button>
@@ -731,6 +741,7 @@ const FAIRNESS_THRESHOLD = 120; // seconds
 
 let state = {
   players: [], // {name, number, preferred, totalSec, onField, position, stintStart}
+  fieldSize: 11, // Players per team: 7, 9, 10, or 11
   gameStartTs: null,
   paused: true,
   breakActive: false,
@@ -785,10 +796,16 @@ function normalizeState() {
   state.gameLengthSec = Number(state.gameLengthSec || GAME_LENGTH_MIN * 60);
   state.periodCount = Number(state.periodCount || 2);
   state.elapsedAdjustment = Number(state.elapsedAdjustment || 0);
+  state.fieldSize = Number(state.fieldSize || 11); // Default to 11v11 for backward compatibility
   if (typeof state.currentPeriodIndex !== "number") state.currentPeriodIndex = 0;
   if (typeof state.periodStartTs !== "number") state.periodStartTs = null;
   state.breakActive = Boolean(state.breakActive);
   ensurePeriodArrays();
+  
+  // Sync UI field size selector with state
+  if (ui.fieldSizeSelect) {
+    ui.fieldSizeSelect.value = state.fieldSize;
+  }
 }
 
 function totalAdjustmentSeconds() {
@@ -871,6 +888,7 @@ let ui = {
 
   // setup
   rosterInput: document.getElementById("rosterInput"),
+  fieldSizeSelect: document.getElementById("fieldSizeSelect"),
   btnExample: document.getElementById("btnExample"),
   btnLoadRoster: document.getElementById("btnLoadRoster"),
   btnSave: document.getElementById("btnSave"),
@@ -993,6 +1011,7 @@ function loadLocal() {
 function resetAll() {
   state = {
     players: [],
+    fieldSize: 11,
     gameStartTs: null,
     paused: true,
     breakActive: false,
@@ -1310,10 +1329,19 @@ ui.btnLoadRoster.onclick = async () => {
     const preferred = parts[2] || "";
     players.push({name, number, preferred, totalSec: 0, onField:false, position:null, stintStart:null});
   }
-  if (players.length < 9) { alert("Need at least 9 players."); return; }
+  
+  // Get selected field size
+  const fieldSize = parseInt(ui.fieldSizeSelect.value);
+  const minPlayers = Math.max(fieldSize - 2, 7); // Allow some roster flexibility
+  
+  if (players.length < minPlayers) { 
+    alert(`Need at least ${minPlayers} players for ${fieldSize}v${fieldSize} format.`); 
+    return; 
+  }
   
   // Update client-side state and localStorage
   state.players = players;
+  state.fieldSize = fieldSize;
   saveLocal();
   
   // Sync with server-side using bulk roster update
@@ -1328,7 +1356,10 @@ ui.btnLoadRoster.onclick = async () => {
     const response = await fetch('/api/roster', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ players: serverPlayers })
+      body: JSON.stringify({ 
+        players: serverPlayers,
+        field_size: fieldSize
+      })
     });
 
     const result = await response.json();
@@ -2768,9 +2799,10 @@ function displayFormation(formation) {
   
   // Update info
   const shape = getFormationShape(formation);
-  const shapeText = shape.total >= 11 ? 
+  const fieldSize = state.fieldSize || 11;
+  const shapeText = shape.total >= fieldSize ? 
     `${shape.def}-${shape.mid}-${shape.for}` : 
-    `Incomplete (${shape.total}/11)`;
+    `Incomplete (${shape.total}/${fieldSize})`;
   ui.formationInfo.textContent = `${formation.name}: ${shapeText}`;
   
   // Render position assignments
@@ -3052,9 +3084,95 @@ function generateFormationPositions(type) {
       positions.push({ x: 60, y: 82, position_code: 'ST' });
       break;
       
+    // 7v7 Formations
+    case '2-3-1':
+      // Defenders
+      positions.push({ x: 35, y: 22, position_code: 'CB' });
+      positions.push({ x: 65, y: 22, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 25, y: 50, position_code: 'LM' });
+      positions.push({ x: 50, y: 48, position_code: 'CM' });
+      positions.push({ x: 75, y: 50, position_code: 'RM' });
+      // Forward
+      positions.push({ x: 50, y: 80, position_code: 'ST' });
+      break;
+      
+    case '3-2-1':
+      // Defenders
+      positions.push({ x: 25, y: 22, position_code: 'CB' });
+      positions.push({ x: 50, y: 20, position_code: 'CB' });
+      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 35, y: 50, position_code: 'CM' });
+      positions.push({ x: 65, y: 50, position_code: 'CM' });
+      // Forward
+      positions.push({ x: 50, y: 80, position_code: 'ST' });
+      break;
+      
+    // 9v9 Formations
+    case '3-3-2':
+      // Defenders
+      positions.push({ x: 25, y: 22, position_code: 'CB' });
+      positions.push({ x: 50, y: 20, position_code: 'CB' });
+      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 25, y: 50, position_code: 'LM' });
+      positions.push({ x: 50, y: 48, position_code: 'CM' });
+      positions.push({ x: 75, y: 50, position_code: 'RM' });
+      // Forwards
+      positions.push({ x: 40, y: 78, position_code: 'ST' });
+      positions.push({ x: 60, y: 78, position_code: 'ST' });
+      break;
+      
+    case '3-2-3':
+      // Defenders
+      positions.push({ x: 25, y: 22, position_code: 'CB' });
+      positions.push({ x: 50, y: 20, position_code: 'CB' });
+      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 35, y: 48, position_code: 'CM' });
+      positions.push({ x: 65, y: 48, position_code: 'CM' });
+      // Forwards
+      positions.push({ x: 25, y: 78, position_code: 'LW' });
+      positions.push({ x: 50, y: 82, position_code: 'ST' });
+      positions.push({ x: 75, y: 78, position_code: 'RW' });
+      break;
+      
+    // 10v10 Formations
+    case '3-4-2':
+      // Defenders
+      positions.push({ x: 25, y: 22, position_code: 'CB' });
+      positions.push({ x: 50, y: 20, position_code: 'CB' });
+      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 20, y: 50, position_code: 'LM' });
+      positions.push({ x: 40, y: 48, position_code: 'CM' });
+      positions.push({ x: 60, y: 48, position_code: 'CM' });
+      positions.push({ x: 80, y: 50, position_code: 'RM' });
+      // Forwards
+      positions.push({ x: 40, y: 78, position_code: 'ST' });
+      positions.push({ x: 60, y: 78, position_code: 'ST' });
+      break;
+      
+    case '4-3-2':
+      // Defenders
+      positions.push({ x: 20, y: 25, position_code: 'LB' });
+      positions.push({ x: 40, y: 20, position_code: 'CB' });
+      positions.push({ x: 60, y: 20, position_code: 'CB' });
+      positions.push({ x: 80, y: 25, position_code: 'RB' });
+      // Midfielders
+      positions.push({ x: 30, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 48, position_code: 'CM' });
+      positions.push({ x: 70, y: 50, position_code: 'CM' });
+      // Forwards
+      positions.push({ x: 40, y: 78, position_code: 'ST' });
+      positions.push({ x: 60, y: 78, position_code: 'ST' });
+      break;
+      
     default:
-      // Default to 4-4-2 positions
-      for (let i = 1; i < 11; i++) {
+      // Default to 4-4-2 positions (or adapt for field size)
+      const fieldSize = state.fieldSize || 11;
+      for (let i = 1; i < fieldSize; i++) {
         positions.push({ x: (i % 3) * 30 + 25, y: Math.floor(i / 3) * 20 + 30, position_code: 'MID' });
       }
   }
