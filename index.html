@@ -2321,20 +2321,37 @@ function renderPlayers() {
         data.players.forEach(player => {
           const row = ui.playersTable.insertRow();
           row.onclick = () => selectPlayer(player);
+          
+          // Calculate age if date_of_birth is available
+          let age = 'N/A';
+          if (player.date_of_birth) {
+            const birthDate = new Date(player.date_of_birth);
+            const today = new Date();
+            age = Math.floor((today - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
+          }
+          
+          // Get preferred positions
+          const positions = player.preferred || 'N/A';
+          
+          // Get games played from statistics
+          const gamesPlayed = player.statistics ? player.statistics.games_played : 0;
+          
           row.innerHTML = `
             <td>${player.name}</td>
-            <td>${player.position}</td>
-            <td>${player.skill_level}</td>
-            <td>${player.contact_info ? player.contact_info.phone || 'N/A' : 'N/A'}</td>
-            <td>${player.stats ? player.stats.goals : 0}</td>
-            <td>${player.stats ? player.stats.assists : 0}</td>
-            <td>${player.attendance ? player.attendance.length : 0}</td>
+            <td>${player.number || 'N/A'}</td>
+            <td>${age}</td>
+            <td>${positions}</td>
+            <td>${gamesPlayed}</td>
+            <td>
+              <button onclick="event.stopPropagation(); editPlayerInline('${player.name}')">Edit</button>
+              <button onclick="event.stopPropagation(); deletePlayerInline('${player.name}')">Delete</button>
+            </td>
           `;
         });
       } else {
         // Handle case where API call failed or returned invalid data
         console.warn('No players data received or API call failed:', data);
-        ui.playersTable.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No players found</td></tr>';
+        ui.playersTable.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #666;">No players found</td></tr>';
       }
     })
     .catch(error => {
@@ -2474,6 +2491,68 @@ function deletePlayer() {
       renderPlayers();
       selectedPlayer = null;
       ui.playerDetails.innerHTML = '';
+      alert('Player deleted successfully!');
+    })
+    .catch(error => {
+      console.error('Error deleting player:', error);
+      alert('Error deleting player: ' + error.message);
+    });
+}
+
+// Inline edit player from table row
+function editPlayerInline(playerName) {
+  // Find the player in the current data
+  fetch('/api/players')
+    .then(response => response.json())
+    .then(data => {
+      const player = data.players.find(p => p.name === playerName);
+      if (!player) {
+        alert('Player not found');
+        return;
+      }
+      
+      const newNumber = prompt('Edit player number:', player.number || '');
+      if (newNumber === null) return; // User cancelled
+      
+      const newPreferred = prompt('Edit preferred position(s):', player.preferred || '');
+      if (newPreferred === null) return; // User cancelled
+      
+      // Update via API
+      fetch(`/api/players/${playerName}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          number: newNumber,
+          preferred: newPreferred
+        })
+      })
+        .then(response => response.json())
+        .then(() => {
+          renderPlayers();
+          alert('Player updated successfully!');
+        })
+        .catch(error => {
+          console.error('Error updating player:', error);
+          alert('Error updating player: ' + error.message);
+        });
+    })
+    .catch(error => {
+      console.error('Error fetching player:', error);
+      alert('Error fetching player: ' + error.message);
+    });
+}
+
+// Inline delete player from table row
+function deletePlayerInline(playerName) {
+  if (!confirm(`Are you sure you want to delete player ${playerName}?`)) {
+    return;
+  }
+  
+  fetch(`/api/players/${playerName}`, {
+    method: 'DELETE'
+  })
+    .then(() => {
+      renderPlayers();
       alert('Player deleted successfully!');
     })
     .catch(error => {

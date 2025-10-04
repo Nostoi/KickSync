@@ -288,8 +288,6 @@ class AnalyticsService:
             return "over"
         return "ok"
 
-<<<<<<< HEAD
-=======
     def export_game_report_csv(self) -> str:
         """
         Export the current game report to CSV format using injected export service.
@@ -299,60 +297,3 @@ class AnalyticsService:
         """
         report = self.generate_game_report()
         return self.export_service.export_to_csv(report)
-        
-        # Create CSV content in memory
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        # Write header info
-        writer.writerow(["Soccer Coach Sideline Timekeeper - Game Report"])
-        writer.writerow(["Generated:", datetime.fromtimestamp(report.generated_ts).strftime("%Y-%m-%d %H:%M:%S")])
-        writer.writerow([])
-        
-        # Write game summary
-        writer.writerow(["Game Summary"])
-        writer.writerow(["Roster Size:", report.roster_size])
-        writer.writerow(["Regulation Time (seconds):", report.regulation_seconds])
-        writer.writerow(["Stoppage Time (seconds):", report.stoppage_seconds])
-        writer.writerow(["Time Adjustments (seconds):", report.adjustment_seconds])
-        writer.writerow(["Game Elapsed (seconds):", report.elapsed_seconds])
-        writer.writerow(["Target Total (seconds):", report.target_seconds_total])
-        writer.writerow(["Target Per Player (seconds):", report.target_seconds_per_player])
-        writer.writerow([])
-        
-        # Write statistics
-        writer.writerow(["Playing Time Statistics"])
-        writer.writerow(["Average Playing Time (seconds):", f"{report.average_seconds:.1f}"])
-        writer.writerow(["Median Playing Time (seconds):", f"{report.median_seconds:.1f}"])
-        writer.writerow(["Minimum Playing Time (seconds):", report.min_seconds])
-        writer.writerow(["Maximum Playing Time (seconds):", report.max_seconds])
-        writer.writerow([])
-        
-        # Write player details
-        writer.writerow(["Player Details"])
-        writer.writerow([
-            "Name", "Number", "Position", "On Field", 
-            "Total Seconds", "Active Stint", "Cumulative", 
-            "Target", "Delta", "Bench Time", "Target Share %", "Fairness"
-        ])
-        
-        for player in report.players:
-            writer.writerow([
-                player.name,
-                player.number,
-                player.position or "",
-                "Yes" if player.on_field else "No",
-                player.total_seconds,
-                player.active_stint_seconds,
-                player.cumulative_seconds,
-                player.target_seconds,
-                player.delta_seconds,
-                player.bench_seconds,
-                f"{player.target_share * 100:.1f}%" if player.target_share else "0.0%",
-                player.fairness.title()
-            ])
-        
-        csv_content = output.getvalue()
-        output.close()
-        return csv_content
->>>>>>> 0fd2c44 (Fix substitution bugs and enhance UI)

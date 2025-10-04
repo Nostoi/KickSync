@@ -1,8 +1,8 @@
 {
   "formations": {
-    "Test Formation": {
-      "name": "Test Formation",
-      "formation_type": "4-4-2",
+    "Base": {
+      "name": "Base",
+      "formation_type": "4-3-3",
       "positions": [
         {
           "x": 50,
@@ -40,14 +40,14 @@
           "player_number": null
         },
         {
-          "x": 20,
+          "x": 35,
           "y": 40,
-          "position_code": "LM",
+          "position_code": "CM",
           "player_name": null,
           "player_number": null
         },
         {
-          "x": 35,
+          "x": 50,
           "y": 35,
           "position_code": "CM",
           "player_name": null,
@@ -55,35 +55,35 @@
         },
         {
           "x": 65,
-          "y": 35,
+          "y": 40,
           "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 20,
+          "y": 70,
+          "position_code": "LW",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 75,
+          "position_code": "ST",
           "player_name": null,
           "player_number": null
         },
         {
           "x": 80,
-          "y": 40,
-          "position_code": "RM",
-          "player_name": null,
-          "player_number": null
-        },
-        {
-          "x": 35,
           "y": 70,
-          "position_code": "ST",
-          "player_name": null,
-          "player_number": null
-        },
-        {
-          "x": 65,
-          "y": 70,
-          "position_code": "ST",
+          "position_code": "RW",
           "player_name": null,
           "player_number": null
         }
       ],
-      "description": "Classic balanced formation with two strikers and solid midfield",
-      "created_at": "2025-09-20T17:58:16.117091",
+      "description": "Attacking formation with wingers and strong midfield triangle",
+      "created_at": "2025-10-04T12:55:28.709387",
       "notes": ""
     }
   },
