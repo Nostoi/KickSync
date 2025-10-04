@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear State</title>
+</head>
+<body>
+    <h1>Clear Persisted State</h1>
+    <button onclick="clearState()">Clear localStorage</button>
+    <p id="status"></p>
+    
+    <script>
+    function clearState() {
+        localStorage.removeItem("sideline_state");
+        document.getElementById('status').textContent = 'localStorage cleared. You can now close this tab.';
+    }
+    </script>
+</body>
+</html>

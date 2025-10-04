@@ -1,0 +1,92 @@
+{
+  "formations": {
+    "Test Formation": {
+      "name": "Test Formation",
+      "formation_type": "4-4-2",
+      "positions": [
+        {
+          "x": 50,
+          "y": 5,
+          "position_code": "GK",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 20,
+          "y": 20,
+          "position_code": "LB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 35,
+          "y": 15,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 65,
+          "y": 15,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 80,
+          "y": 20,
+          "position_code": "RB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 20,
+          "y": 40,
+          "position_code": "LM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 35,
+          "y": 35,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 65,
+          "y": 35,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 80,
+          "y": 40,
+          "position_code": "RM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 35,
+          "y": 70,
+          "position_code": "ST",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 65,
+          "y": 70,
+          "position_code": "ST",
+          "player_name": null,
+          "player_number": null
+        }
+      ],
+      "description": "Classic balanced formation with two strikers and solid midfield",
+      "created_at": "2025-09-20T17:58:16.117091",
+      "notes": ""
+    }
+  },
+  "substitution_plans": {},
+  "opponent_notes": {}
+}

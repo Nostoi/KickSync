@@ -15,4 +15,5 @@ from src.ui.web_app import run_web_app
 if __name__ == "__main__":
     # Run web app serving files from the project root
     project_root = os.path.dirname(__file__)
-    run_web_app(static_folder=project_root)
+    port = int(os.environ.get("FLASK_RUN_PORT", 7122))
+    run_web_app(static_folder=project_root, port=port)

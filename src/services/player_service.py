@@ -7,9 +7,10 @@ statistics tracking, attendance management, and player data operations.
 import json
 import os
 import shutil
+from abc import ABC, abstractmethod
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Protocol
 from src.models.player import (
     Player, ContactInfo, MedicalInfo, PlayerStats, 
     GameAttendance, SkillLevel, DisciplinaryAction
@@ -22,6 +23,206 @@ class PlayerValidationError(Exception):
     pass
 
 
+class ValidationStrategy(Protocol):
+    """Protocol for player validation strategies - supports OCP."""
+    
+    def validate(self, player: Player) -> List[str]:
+        """Validate player data and return error messages."""
+        ...
+
+
+class PositionProvider(Protocol):
+    """Protocol for position validation - supports OCP and DIP."""
+    
+    def get_valid_positions(self) -> Dict[str, str]:
+        """Get valid positions mapping."""
+        ...
+
+
+class StandardPositionProvider:
+    """Standard soccer position definitions - implements OCP."""
+    
+    def get_valid_positions(self) -> Dict[str, str]:
+        """Get standard soccer positions."""
+        return {
+            "GK": "Goalkeeper",
+            "DF": "Defender", 
+            "CB": "Center Back",
+            "LB": "Left Back",
+            "RB": "Right Back",
+            "MF": "Midfielder",
+            "CM": "Center Midfielder",
+            "LM": "Left Midfielder", 
+            "RM": "Right Midfielder",
+            "AM": "Attacking Midfielder",
+            "DM": "Defensive Midfielder",
+            "ST": "Striker",
+            "LW": "Left Winger",
+            "RW": "Right Winger",
+            "CF": "Center Forward"
+        }
+
+
+class BasicValidationStrategy:
+    """Basic validation rules for player data."""
+    
+    def validate(self, player: Player) -> List[str]:
+        """Validate basic player requirements."""
+        errors = []
+        
+        if not player.name or not player.name.strip():
+            errors.append("Player name is required")
+        elif len(player.name.strip()) < 2:
+            errors.append("Player name must be at least 2 characters long")
+            
+        return errors
+
+
+class NumberValidationStrategy:
+    """Validation strategy for player numbers."""
+    
+    def validate(self, player: Player) -> List[str]:
+        """Validate player number constraints."""
+        if not player.number:
+            return []
+        
+        if not player.number.isdigit():
+            return ["Player number must be numeric"]
+        
+        number = int(player.number)
+        if not (1 <= number <= 99):
+            return ["Player number must be between 1 and 99"]
+            
+        return []
+
+
+class AgeValidationStrategy:
+    """Validation strategy for player age/birth date."""
+    
+    def __init__(self, min_age: int = 4, max_age: int = 25):
+        self.min_age = min_age
+        self.max_age = max_age
+    
+    def validate(self, player: Player) -> List[str]:
+        """Validate player age constraints."""
+        if not player.date_of_birth:
+            return []
+        
+        today = date.today()
+        if player.date_of_birth > today:
+            return ["Date of birth cannot be in the future"]
+        
+        age = today.year - player.date_of_birth.year
+        if today.month < player.date_of_birth.month or \
+           (today.month == player.date_of_birth.month and today.day < player.date_of_birth.day):
+            age -= 1
+        
+        if age < self.min_age:
+            return [f"Player appears too young (under {self.min_age})"]
+        if age > self.max_age:
+            return [f"Player appears too old for youth soccer (over {self.max_age})"]
+            
+        return []
+
+
+class PositionValidationStrategy:
+    """Validation strategy for player positions."""
+    
+    def __init__(self, position_provider: PositionProvider):
+        self.position_provider = position_provider
+    
+    def validate(self, player: Player) -> List[str]:
+        """Validate position constraints."""
+        if not player.preferred:
+            return []
+        
+        valid_positions = self.position_provider.get_valid_positions()
+        positions = [p.strip().upper() for p in player.preferred.split(',') if p.strip()]
+        invalid_positions = [p for p in positions if p not in valid_positions]
+        
+        if invalid_positions:
+            return [f"Invalid positions: {', '.join(invalid_positions)}"]
+        return []
+
+
+class PlayerValidator:
+    """Composable player validator using strategy pattern - follows OCP and SRP."""
+    
+    def __init__(
+        self, 
+        strategies: Optional[List[ValidationStrategy]] = None,
+        position_provider: Optional[PositionProvider] = None
+    ):
+        """Initialize with validation strategies."""
+        self.position_provider = position_provider or StandardPositionProvider()
+        
+        if strategies is None:
+            # Default validation strategies
+            self.strategies = [
+                BasicValidationStrategy(),
+                NumberValidationStrategy(),
+                AgeValidationStrategy(),
+                PositionValidationStrategy(self.position_provider)
+            ]
+        else:
+            self.strategies = strategies
+    
+    def validate_player_data(self, player: Player) -> List[str]:
+        """Validate player using all configured strategies."""
+        errors = []
+        
+        for strategy in self.strategies:
+            errors.extend(strategy.validate(player))
+        
+        return errors
+    
+    def add_validation_strategy(self, strategy: ValidationStrategy) -> None:
+        """Add new validation strategy - supports OCP."""
+        self.strategies.append(strategy)
+    
+    def remove_validation_strategy(self, strategy_type: type) -> None:
+        """Remove validation strategy by type."""
+        self.strategies = [s for s in self.strategies if not isinstance(s, strategy_type)]
+
+
+class PlayerCSVHandler:
+    """Dedicated class for CSV operations following SRP."""
+    
+    def export_to_csv(self, players: List[Player]) -> str:
+        """Export player list to CSV format."""
+        if not players:
+            return "Name,Number,Position,Date of Birth,Contact\n"
+        
+        lines = ["Name,Number,Position,Date of Birth,Contact"]
+        
+        for player in players:
+            contact = player.contact_info.phone if player.contact_info else ""
+            birth_date = player.date_of_birth.isoformat() if player.date_of_birth else ""
+            
+            lines.append(f"{player.name},{player.number or ''},{player.position},{birth_date},{contact}")
+        
+        return "\n".join(lines)
+    
+    def import_from_csv(self, csv_content: str) -> List[Player]:
+        """Import players from CSV content."""
+        lines = csv_content.strip().split('\n')
+        if len(lines) <= 1:  # Header only or empty
+            return []
+        
+        players = []
+        for line in lines[1:]:  # Skip header
+            parts = [part.strip() for part in line.split(',')]
+            if len(parts) >= 1 and parts[0]:  # At least name required
+                player = Player(
+                    name=parts[0],
+                    number=parts[1] if len(parts) > 1 and parts[1] else None,
+                    position=parts[2] if len(parts) > 2 and parts[2] else "MF"
+                )
+                players.append(player)
+        
+        return players
+
+
 class PlayerService:
     """
     Service class for managing player data and operations.
@@ -30,32 +231,22 @@ class PlayerService:
     attendance management, and data persistence operations.
     """
     
-    # Standard soccer positions
-    VALID_POSITIONS = {
-        "GK": "Goalkeeper",
-        "DF": "Defender", 
-        "CB": "Center Back",
-        "LB": "Left Back",
-        "RB": "Right Back",
-        "MF": "Midfielder",
-        "CM": "Center Midfielder",
-        "LM": "Left Midfielder", 
-        "RM": "Right Midfielder",
-        "AM": "Attacking Midfielder",
-        "DM": "Defensive Midfielder",
-        "ST": "Striker",
-        "LW": "Left Winger",
-        "RW": "Right Winger",
-        "CF": "Center Forward"
-    }
-    
-    def __init__(self, persistence_service: Optional[PersistenceService] = None):
+    def __init__(
+        self, 
+        validator: Optional[PlayerValidator] = None,
+        csv_handler: Optional[PlayerCSVHandler] = None,
+        persistence_service: Optional[PersistenceService] = None
+    ):
         """
-        Initialize PlayerService.
+        Initialize PlayerService with injected dependencies.
         
         Args:
-            persistence_service: Optional persistence service instance
+            validator: Player validation service
+            csv_handler: CSV import/export service
+            persistence_service: Data persistence service
         """
+        self.validator = validator or PlayerValidator()
+        self.csv_handler = csv_handler or PlayerCSVHandler()
         self.persistence_service = persistence_service or PersistenceService()
         
     def validate_player_data(self, player: Player) -> List[str]:
@@ -85,7 +276,8 @@ class PlayerService:
         # Preferred positions validation
         if player.preferred:
             positions = player.preferred_list()
-            invalid_positions = [p for p in positions if p not in self.VALID_POSITIONS]
+            valid_positions = self.validator.position_provider.get_valid_positions()
+            invalid_positions = [p for p in positions if p not in valid_positions]
             if invalid_positions:
                 errors.append(f"Invalid positions: {', '.join(invalid_positions)}")
         
@@ -98,8 +290,9 @@ class PlayerService:
                 errors.append("Player appears too old for youth soccer (over 25)")
         
         # Skill ratings validation
+        valid_positions = self.validator.position_provider.get_valid_positions()
         for position, rating in player.skill_ratings.items():
-            if position not in self.VALID_POSITIONS:
+            if position not in valid_positions:
                 errors.append(f"Invalid skill rating position: {position}")
             elif not 1 <= rating <= 5:
                 errors.append(f"Skill rating for {position} must be between 1 and 5")

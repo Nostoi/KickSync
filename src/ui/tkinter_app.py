@@ -10,8 +10,10 @@ from typing import Dict, List, Tuple, Optional
 from datetime import date, datetime
 
 from ..models import GameState, Player, ContactInfo, MedicalInfo, PlayerStats
+from ..models.formation import Formation, FormationType, FieldPosition, Position
 from ..services import AnalyticsService, PersistenceService, TimerService
 from ..services.player_service import PlayerService, PlayerValidationError
+from ..services.strategy_service import StrategyService
 from ..utils import (
     fmt_mmss,
     now_ts,
@@ -64,6 +66,7 @@ class SidelineApp(tk.Tk):
         self.timer_service = TimerService(self.state)
         self.analytics_service = AnalyticsService(self.state, self.timer_service)
         self.player_service = PlayerService()
+        self.strategy_service = StrategyService(self.state)
         self.sub_queue: List[Tuple[str, str]] = []  # (out_name, in_name) queued
         self.after_timer = None
 
@@ -109,7 +112,19 @@ class SidelineApp(tk.Tk):
         reportsm.add_command(
             label="Playing Time Report", command=self.show_reports
         )
+        reportsm.add_separator()
+        reportsm.add_command(
+            label="Export Report CSV…", command=self.export_report_csv
+        )
         mbar.add_cascade(label="Reports", menu=reportsm)
+
+        # Strategy menu
+        strategym = tk.Menu(mbar, tearoff=0)
+        strategym.add_command(label="Formation Editor…", command=self.show_formations)
+        strategym.add_separator()
+        strategym.add_command(label="Substitution Plans…", command=self.manage_substitution_plans)
+        strategym.add_command(label="Opponent Scouting…", command=self.manage_opponent_notes)
+        mbar.add_cascade(label="Strategy", menu=strategym)
 
         self.config(menu=mbar)
 
@@ -118,7 +133,7 @@ class SidelineApp(tk.Tk):
         self.container.pack(fill="both", expand=True)
         self.frames: Dict[str, tk.Frame] = {}
 
-        for FrameClass in (HomeView, LineupView, GameView, ReportsView):
+        for FrameClass in (HomeView, LineupView, GameView, ReportsView, FormationView):
             frame = FrameClass(self.container, self)
             self.frames[FrameClass.__name__] = frame
             frame.grid(row=0, column=0, sticky="nsew")
@@ -138,6 +153,15 @@ class SidelineApp(tk.Tk):
     def show_reports(self):
         self._show_frame("ReportsView")
 
+    def show_formations(self):
+        self._show_frame("FormationView")
+
+    def manage_substitution_plans(self):
+        messagebox.showinfo("Strategy", "Substitution plan management coming soon!")
+
+    def manage_opponent_notes(self):
+        messagebox.showinfo("Strategy", "Opponent scouting management coming soon!")
+
     def _show_frame(self, frame_name: str):
         frame = self.frames[frame_name]
         frame.tkraise()
@@ -154,6 +178,7 @@ class SidelineApp(tk.Tk):
         self.state = GameState(roster={p.name: p for p in players})
         self.timer_service = TimerService(self.state)
         self.analytics_service = AnalyticsService(self.state, self.timer_service)
+        self.strategy_service = StrategyService(self.state)
         self.sub_queue.clear()
         self.show_home()
 
@@ -184,6 +209,7 @@ class SidelineApp(tk.Tk):
             self.state = PersistenceService.load_game_from_file(path)
             self.timer_service = TimerService(self.state)
             self.analytics_service = AnalyticsService(self.state, self.timer_service)
+            self.strategy_service = StrategyService(self.state)
             self.sub_queue.clear()
             self.show_home()
             messagebox.showinfo(APP_TITLE, "Game loaded.")
@@ -420,6 +446,28 @@ class SidelineApp(tk.Tk):
             messagebox.showinfo(APP_TITLE, f"Successfully exported {len(self.state.roster)} players.")
         except Exception as e:
             messagebox.showerror(APP_TITLE, f"Failed to export players: {e}")
+
+    def export_report_csv(self):
+        """Export current game analytics report as CSV."""
+        if not self.state.roster:
+            messagebox.showinfo(APP_TITLE, "No players in roster to export a report.")
+            return
+        
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            title="Export Game Report"
+        )
+        if not path:
+            return
+        
+        try:
+            csv_content = self.analytics_service.export_game_report_csv()
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(csv_content)
+            messagebox.showinfo(APP_TITLE, "Game report exported successfully.")
+        except Exception as e:
+            messagebox.showerror(APP_TITLE, f"Failed to export report: {e}")
 
     # ---------- UI Updates ---------- #
     def refresh_tables(self):
@@ -2144,6 +2192,711 @@ def create_tkinter_app() -> SidelineApp:
         Configured SidelineApp instance
     """
     return SidelineApp()
+
+
+
+class FormationView(ttk.Frame):
+    """Formation editor view for tactical planning and player positioning."""
+    
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        self.current_formation: Optional[Formation] = None
+        self.field_canvas_size = (600, 400)  # Canvas size for the field
+        self.field_positions_widgets = {}  # Track position widgets on canvas
+        self._build_ui()
+
+    def _build_ui(self):
+        """Build the formation editor interface."""
+        
+        # Title
+        ttk.Label(self, text="Formation Editor", font=("Arial", 16, "bold")).pack(pady=10)
+        
+        # Main container with paned window
+        main_paned = ttk.PanedWindow(self, orient="horizontal")
+        main_paned.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Left panel - Formation management
+        left_frame = ttk.Frame(main_paned)
+        main_paned.add(left_frame, weight=1)
+        
+        # Right panel - Field visualization
+        right_frame = ttk.Frame(main_paned)
+        main_paned.add(right_frame, weight=2)
+        
+        self._build_left_panel(left_frame)
+        self._build_right_panel(right_frame)
+    
+    def _build_left_panel(self, parent):
+        """Build the left control panel."""
+        
+        # Formation selection
+        selection_frame = ttk.LabelFrame(parent, text="Formation Selection", padding=10)
+        selection_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(selection_frame, text="Formations:").pack(anchor="w")
+        self.formation_listbox = tk.Listbox(selection_frame, height=6)
+        self.formation_listbox.pack(fill="x", pady=5)
+        self.formation_listbox.bind("<<ListboxSelect>>", self._on_formation_select)
+        
+        # Formation control buttons
+        btn_frame = ttk.Frame(selection_frame)
+        btn_frame.pack(fill="x", pady=5)
+        ttk.Button(btn_frame, text="New", command=self._new_formation).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="Template", command=self._from_template).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="Save", command=self._save_formation).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="Delete", command=self._delete_formation).pack(side="left", padx=2)
+        
+        # Formation details
+        details_frame = ttk.LabelFrame(parent, text="Formation Details", padding=10)
+        details_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(details_frame, text="Name:").grid(row=0, column=0, sticky="w", pady=2)
+        self.name_var = tk.StringVar()
+        self.name_entry = ttk.Entry(details_frame, textvariable=self.name_var, width=30)
+        self.name_entry.grid(row=0, column=1, sticky="ew", pady=2)
+        
+        ttk.Label(details_frame, text="Type:").grid(row=1, column=0, sticky="w", pady=2)
+        self.type_var = tk.StringVar()
+        self.type_combo = ttk.Combobox(details_frame, textvariable=self.type_var, width=27)
+        self.type_combo['values'] = [ft.value for ft in FormationType]
+        self.type_combo.grid(row=1, column=1, sticky="ew", pady=2)
+        
+        ttk.Label(details_frame, text="Description:").grid(row=2, column=0, sticky="nw", pady=2)
+        self.desc_text = tk.Text(details_frame, width=30, height=3)
+        self.desc_text.grid(row=2, column=1, sticky="ew", pady=2)
+        
+        details_frame.columnconfigure(1, weight=1)
+        
+        # Player assignment
+        players_frame = ttk.LabelFrame(parent, text="Player Assignment", padding=10)
+        players_frame.pack(fill="both", expand=True, pady=5)
+        
+        # Position list with player assignments
+        ttk.Label(players_frame, text="Positions:").pack(anchor="w")
+        
+        # Create scrollable frame for positions
+        positions_canvas = tk.Canvas(players_frame, height=200)
+        positions_scrollbar = ttk.Scrollbar(players_frame, orient="vertical", command=positions_canvas.yview)
+        self.positions_frame = ttk.Frame(positions_canvas)
+        
+        positions_canvas.configure(yscrollcommand=positions_scrollbar.set)
+        positions_canvas.pack(side="left", fill="both", expand=True)
+        positions_scrollbar.pack(side="right", fill="y")
+        
+        positions_canvas.create_window((0, 0), window=self.positions_frame, anchor="nw")
+        self.positions_frame.bind("<Configure>", 
+                                 lambda e: positions_canvas.configure(scrollregion=positions_canvas.bbox("all")))
+        
+        # Quick actions
+        actions_frame = ttk.LabelFrame(parent, text="Quick Actions", padding=10)
+        actions_frame.pack(fill="x", pady=5)
+        
+        ttk.Button(actions_frame, text="Auto-Assign Players", command=self._auto_assign_players).pack(fill="x", pady=2)
+        ttk.Button(actions_frame, text="Clear All Assignments", command=self._clear_assignments).pack(fill="x", pady=2)
+        ttk.Button(actions_frame, text="Suggest Formation", command=self._suggest_formation).pack(fill="x", pady=2)
+    
+    def _build_right_panel(self, parent):
+        """Build the right field visualization panel."""
+        
+        # Field visualization
+        field_frame = ttk.LabelFrame(parent, text="Field Visualization", padding=10)
+        field_frame.pack(fill="both", expand=True)
+        
+        # Field canvas
+        self.field_canvas = tk.Canvas(field_frame, 
+                                    width=self.field_canvas_size[0], 
+                                    height=self.field_canvas_size[1],
+                                    bg="lightgreen")
+        self.field_canvas.pack(pady=10)
+        
+        # Draw field markings
+        self._draw_field()
+        
+        # Formation info
+        info_frame = ttk.Frame(field_frame)
+        info_frame.pack(fill="x", pady=5)
+        
+        self.formation_info_label = ttk.Label(info_frame, text="No formation selected", font=("Arial", 10))
+        self.formation_info_label.pack()
+        
+        # Legend
+        legend_frame = ttk.LabelFrame(field_frame, text="Legend", padding=5)
+        legend_frame.pack(fill="x", pady=5)
+        
+        legend_text = "🟢 Goalkeeper  🔵 Defender  🟡 Midfielder  🔴 Forward  ⚪ Unassigned"
+        ttk.Label(legend_frame, text=legend_text, font=("Arial", 9)).pack()
+    
+    def _draw_field(self):
+        """Draw soccer field markings on canvas."""
+        canvas = self.field_canvas
+        width, height = self.field_canvas_size
+        
+        # Clear canvas
+        canvas.delete("field_marking")
+        
+        # Field boundaries
+        canvas.create_rectangle(10, 10, width-10, height-10, 
+                              outline="white", width=3, tags="field_marking")
+        
+        # Center line
+        canvas.create_line(width//2, 10, width//2, height-10, 
+                         fill="white", width=2, tags="field_marking")
+        
+        # Center circle
+        center_x, center_y = width//2, height//2
+        canvas.create_oval(center_x-50, center_y-50, center_x+50, center_y+50,
+                          outline="white", width=2, tags="field_marking")
+        
+        # Goals
+        goal_width = 60
+        goal_height = 20
+        # Left goal
+        canvas.create_rectangle(10, height//2 - goal_height//2, 10+goal_height, height//2 + goal_height//2,
+                              outline="white", width=2, tags="field_marking")
+        # Right goal  
+        canvas.create_rectangle(width-10-goal_height, height//2 - goal_height//2, width-10, height//2 + goal_height//2,
+                              outline="white", width=2, tags="field_marking")
+        
+        # Penalty areas
+        penalty_width = 100
+        penalty_height = 120
+        # Left penalty area
+        canvas.create_rectangle(10, height//2 - penalty_height//2, 10+penalty_width, height//2 + penalty_height//2,
+                              outline="white", width=2, tags="field_marking")
+        # Right penalty area
+        canvas.create_rectangle(width-10-penalty_width, height//2 - penalty_height//2, width-10, height//2 + penalty_height//2,
+                              outline="white", width=2, tags="field_marking")
+    
+    def _refresh_formation_list(self):
+        """Refresh the formation list."""
+        self.formation_listbox.delete(0, tk.END)
+        
+        # Add formations
+        formations = self.controller.strategy_service.list_formations()
+        for formation in formations:
+            self.formation_listbox.insert(tk.END, formation.name)
+        
+        # Add templates
+        templates = self.controller.strategy_service.get_formation_templates()
+        if templates:
+            self.formation_listbox.insert(tk.END, "--- Templates ---")
+            for template in templates:
+                self.formation_listbox.insert(tk.END, f"Template: {template.name}")
+    
+    def _on_formation_select(self, event):
+        """Handle formation selection."""
+        selection = self.formation_listbox.curselection()
+        if not selection:
+            return
+        
+        selected_text = self.formation_listbox.get(selection[0])
+        
+        if selected_text == "--- Templates ---":
+            return
+        
+        if selected_text.startswith("Template: "):
+            # Template selected
+            template_name = selected_text[10:]  # Remove "Template: " prefix
+            templates = self.controller.strategy_service.get_formation_templates()
+            template = next((t for t in templates if t.name == template_name), None)
+            if template:
+                self.current_formation = template
+                self._update_formation_display()
+        else:
+            # Regular formation selected
+            formation = self.controller.strategy_service.get_formation(selected_text)
+            if formation:
+                self.current_formation = formation
+                self._update_formation_display()
+    
+    def _update_formation_display(self):
+        """Update the formation display with current formation."""
+        if not self.current_formation:
+            return
+        
+        # Update form fields
+        self.name_var.set(self.current_formation.name)
+        self.type_var.set(self.current_formation.formation_type.value)
+        
+        self.desc_text.delete(1.0, tk.END)
+        self.desc_text.insert(1.0, self.current_formation.description or "")
+        
+        # Update position assignments
+        self._refresh_position_assignments()
+        
+        # Update field visualization
+        self._draw_formation_on_field()
+        
+        # Update info label
+        shape = self.current_formation.get_formation_shape()
+        shape_str = f"{shape[1]}-{shape[2]}-{shape[3]}" if shape[0] >= 11 else f"Incomplete ({shape[0]}/11)"
+        self.formation_info_label.config(text=f"{self.current_formation.name}: {shape_str}")
+    
+    def _refresh_position_assignments(self):
+        """Refresh the position assignment widgets."""
+        # Clear existing widgets
+        for widget in self.positions_frame.winfo_children():
+            widget.destroy()
+        
+        if not self.current_formation:
+            return
+        
+        # Create assignment widgets for each position
+        available_players = list(self.controller.state.roster.keys())
+        available_players.insert(0, "")  # Empty option for unassigned
+        
+        for i, position in enumerate(self.current_formation.positions):
+            frame = ttk.Frame(self.positions_frame)
+            frame.pack(fill="x", pady=2)
+            
+            # Position label
+            pos_text = f"{i+1}. {position.position_code.value}"
+            ttk.Label(frame, text=pos_text, width=12).pack(side="left")
+            
+            # Player selection
+            player_var = tk.StringVar()
+            player_var.set(position.player_name or "")
+            
+            combo = ttk.Combobox(frame, textvariable=player_var, values=available_players, width=20)
+            combo.pack(side="left", padx=5)
+            
+            # Bind change event
+            combo.bind("<<ComboboxSelected>>", 
+                      lambda e, idx=i, var=player_var: self._on_player_assignment_change(idx, var.get()))
+    
+    def _on_player_assignment_change(self, position_index: int, player_name: str):
+        """Handle player assignment change."""
+        if not self.current_formation:
+            return
+        
+        if player_name == "":
+            self.current_formation.clear_assignment(position_index)
+        else:
+            if player_name in self.controller.state.roster:
+                player = self.controller.state.roster[player_name]
+                self.current_formation.assign_player(position_index, player.name, player.number)
+        
+        # Refresh display
+        self._draw_formation_on_field()
+        self._update_formation_info()
+    
+    def _draw_formation_on_field(self):
+        """Draw formation positions on the field canvas."""
+        if not self.current_formation:
+            return
+        
+        canvas = self.field_canvas
+        canvas.delete("formation")
+        
+        width, height = self.field_canvas_size
+        
+        for position in self.current_formation.positions:
+            # Convert field position (0-100) to canvas coordinates
+            canvas_x = int(position.x * (width - 40) / 100) + 20
+            canvas_y = int(position.y * (height - 40) / 100) + 20
+            
+            # Choose color based on position
+            if position.position_code == Position.GOALKEEPER:
+                color = "green"
+            elif position.position_code in [Position.DEFENDER, Position.CENTER_BACK, Position.LEFT_BACK, Position.RIGHT_BACK]:
+                color = "blue"
+            elif position.position_code in [Position.MIDFIELDER, Position.CENTRAL_MIDFIELDER, Position.DEFENSIVE_MIDFIELDER, 
+                                          Position.ATTACKING_MIDFIELDER, Position.LEFT_MIDFIELDER, Position.RIGHT_MIDFIELDER]:
+                color = "yellow"
+            elif position.position_code in [Position.FORWARD, Position.STRIKER, Position.LEFT_WINGER, Position.RIGHT_WINGER]:
+                color = "red"
+            else:
+                color = "gray"
+            
+            # Draw position circle
+            radius = 15
+            circle = canvas.create_oval(canvas_x - radius, canvas_y - radius,
+                                      canvas_x + radius, canvas_y + radius,
+                                      fill=color, outline="black", width=2, tags="formation")
+            
+            # Draw player info
+            if position.player_name:
+                # Player name/number
+                text = f"{position.player_number}" if position.player_number else position.player_name[:3]
+                canvas.create_text(canvas_x, canvas_y, text=text, fill="white", 
+                                 font=("Arial", 8, "bold"), tags="formation")
+            else:
+                # Position code
+                text = position.position_code.value[:2]
+                canvas.create_text(canvas_x, canvas_y, text=text, fill="white",
+                                 font=("Arial", 7), tags="formation")
+    
+    def _update_formation_info(self):
+        """Update formation info display."""
+        if not self.current_formation:
+            self.formation_info_label.config(text="No formation selected")
+            return
+        
+        shape = self.current_formation.get_formation_shape()
+        shape_str = f"{shape[1]}-{shape[2]}-{shape[3]}" if shape[0] >= 11 else f"Incomplete ({shape[0]}/11)"
+        self.formation_info_label.config(text=f"{self.current_formation.name}: {shape_str}")
+    
+    def _new_formation(self):
+        """Create a new formation."""
+        dialog = FormationDialog(self, "Create New Formation")
+        if dialog.result:
+            name, formation_type, description = dialog.result
+            
+            # Create basic formation based on type
+            if formation_type == "4-4-2":
+                positions = [
+                    FieldPosition(50, 5, Position.GOALKEEPER),   # GK
+                    # Defenders
+                    FieldPosition(20, 25, Position.LEFT_BACK),   # LB
+                    FieldPosition(35, 20, Position.CENTER_BACK), # CB
+                    FieldPosition(65, 20, Position.CENTER_BACK), # CB
+                    FieldPosition(80, 25, Position.RIGHT_BACK),  # RB
+                    # Midfielders
+                    FieldPosition(20, 55, Position.LEFT_MIDFIELDER),   # LM
+                    FieldPosition(40, 50, Position.CENTRAL_MIDFIELDER), # CM
+                    FieldPosition(60, 50, Position.CENTRAL_MIDFIELDER), # CM
+                    FieldPosition(80, 55, Position.RIGHT_MIDFIELDER),  # RM
+                    # Forwards
+                    FieldPosition(40, 80, Position.STRIKER),    # ST
+                    FieldPosition(60, 80, Position.STRIKER)     # ST
+                ]
+            elif formation_type == "4-3-3":
+                positions = [
+                    FieldPosition(50, 5, Position.GOALKEEPER),   # GK
+                    # Defenders
+                    FieldPosition(20, 25, Position.LEFT_BACK),   # LB
+                    FieldPosition(35, 20, Position.CENTER_BACK), # CB
+                    FieldPosition(65, 20, Position.CENTER_BACK), # CB
+                    FieldPosition(80, 25, Position.RIGHT_BACK),  # RB
+                    # Midfielders
+                    FieldPosition(30, 50, Position.CENTRAL_MIDFIELDER), # CM
+                    FieldPosition(50, 45, Position.CENTRAL_MIDFIELDER), # CM
+                    FieldPosition(70, 50, Position.CENTRAL_MIDFIELDER), # CM
+                    # Forwards
+                    FieldPosition(25, 80, Position.LEFT_WINGER),  # LW
+                    FieldPosition(50, 85, Position.STRIKER),     # ST
+                    FieldPosition(75, 80, Position.RIGHT_WINGER) # RW
+                ]
+            else:  # Default to 4-4-2
+                positions = [
+                    FieldPosition(50, 5, Position.GOALKEEPER),
+                    FieldPosition(20, 25, Position.LEFT_BACK),
+                    FieldPosition(35, 20, Position.CENTER_BACK),
+                    FieldPosition(65, 20, Position.CENTER_BACK),
+                    FieldPosition(80, 25, Position.RIGHT_BACK),
+                    FieldPosition(20, 55, Position.LEFT_MIDFIELDER),
+                    FieldPosition(40, 50, Position.CENTRAL_MIDFIELDER),
+                    FieldPosition(60, 50, Position.CENTRAL_MIDFIELDER),
+                    FieldPosition(80, 55, Position.RIGHT_MIDFIELDER),
+                    FieldPosition(40, 80, Position.STRIKER),
+                    FieldPosition(60, 80, Position.STRIKER)
+                ]
+            
+            try:
+                formation_type_enum = FormationType(formation_type)
+                formation = self.controller.strategy_service.create_formation(
+                    name, formation_type_enum, positions, description
+                )
+                self.current_formation = formation
+                self._refresh_formation_list()
+                self._update_formation_display()
+                messagebox.showinfo("Success", f"Formation '{name}' created successfully!")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create formation: {e}")
+    
+    def _from_template(self):
+        """Create formation from template."""
+        templates = self.controller.strategy_service.get_formation_templates()
+        if not templates:
+            messagebox.showinfo("Templates", "No formation templates available.")
+            return
+        
+        # Create selection dialog
+        dialog = TemplateSelectionDialog(self, templates)
+        if dialog.result:
+            template, name = dialog.result
+            try:
+                formation = self.controller.strategy_service.create_from_template(template.formation_type, name)
+                if formation:
+                    self.current_formation = formation
+                    self._refresh_formation_list()
+                    self._update_formation_display()
+                    messagebox.showinfo("Success", f"Formation '{name}' created from template!")
+                else:
+                    messagebox.showerror("Error", "Failed to create formation from template.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create formation: {e}")
+    
+    def _save_formation(self):
+        """Save current formation changes."""
+        if not self.current_formation:
+            messagebox.showwarning("Warning", "No formation selected.")
+            return
+        
+        # Update formation with current form values
+        self.current_formation.name = self.name_var.get().strip()
+        if not self.current_formation.name:
+            messagebox.showerror("Error", "Formation name cannot be empty.")
+            return
+        
+        try:
+            self.current_formation.formation_type = FormationType(self.type_var.get())
+        except ValueError:
+            messagebox.showerror("Error", "Invalid formation type selected.")
+            return
+        
+        self.current_formation.description = self.desc_text.get(1.0, tk.END).strip()
+        
+        # Save to strategy service
+        try:
+            # The formation is already in the service, just need to save to file
+            self.controller.strategy_service._save_data()
+            self._refresh_formation_list()
+            messagebox.showinfo("Success", "Formation saved successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save formation: {e}")
+    
+    def _delete_formation(self):
+        """Delete selected formation."""
+        if not self.current_formation:
+            messagebox.showwarning("Warning", "No formation selected.")
+            return
+        
+        result = messagebox.askyesno("Confirm Delete", 
+                                   f"Are you sure you want to delete the formation '{self.current_formation.name}'?")
+        if result:
+            try:
+                self.controller.strategy_service.delete_formation(self.current_formation.name)
+                self.current_formation = None
+                self._refresh_formation_list()
+                self._clear_display()
+                messagebox.showinfo("Success", "Formation deleted successfully!")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete formation: {e}")
+    
+    def _clear_display(self):
+        """Clear the formation display."""
+        self.name_var.set("")
+        self.type_var.set("")
+        self.desc_text.delete(1.0, tk.END)
+        self.field_canvas.delete("formation")
+        self.formation_info_label.config(text="No formation selected")
+        
+        # Clear position assignments
+        for widget in self.positions_frame.winfo_children():
+            widget.destroy()
+    
+    def _auto_assign_players(self):
+        """Auto-assign players to formation positions."""
+        if not self.current_formation:
+            messagebox.showwarning("Warning", "No formation selected.")
+            return
+        
+        available_players = list(self.controller.state.roster.values())
+        if len(available_players) < len(self.current_formation.positions):
+            messagebox.showwarning("Warning", "Not enough players for this formation.")
+            return
+        
+        # Simple assignment logic
+        assigned_players = set()
+        for i, position in enumerate(self.current_formation.positions):
+            # Find a suitable unassigned player
+            for player in available_players:
+                if player.name not in assigned_players:
+                    self.current_formation.assign_player(i, player.name, player.number)
+                    assigned_players.add(player.name)
+                    break
+        
+        self._refresh_position_assignments()
+        self._draw_formation_on_field()
+        self._update_formation_info()
+        messagebox.showinfo("Success", "Players auto-assigned to formation!")
+    
+    def _clear_assignments(self):
+        """Clear all player assignments."""
+        if not self.current_formation:
+            messagebox.showwarning("Warning", "No formation selected.")
+            return
+        
+        self.current_formation.clear_assignments()
+        self._refresh_position_assignments()
+        self._draw_formation_on_field()
+        self._update_formation_info()
+        messagebox.showinfo("Success", "All player assignments cleared!")
+    
+    def _suggest_formation(self):
+        """Suggest optimal formation based on available players."""
+        available_players = list(self.controller.state.roster.values())
+        
+        suggested = self.controller.strategy_service.suggest_optimal_formation(available_players)
+        if suggested:
+            self.current_formation = suggested
+            self._update_formation_display()
+            messagebox.showinfo("Formation Suggested", 
+                              f"Suggested formation: {suggested.name}\n"
+                              f"Based on your current roster composition.")
+        else:
+            messagebox.showinfo("No Suggestion", 
+                              "Unable to suggest a formation. Make sure you have at least 11 players.")
+    
+    def on_show(self):
+        """Called when the view is shown."""
+        self._refresh_formation_list()
+
+
+class FormationDialog:
+    """Dialog for creating new formations."""
+    
+    def __init__(self, parent, title="Formation"):
+        self.result = None
+        
+        # Create dialog window
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(title)
+        self.dialog.geometry("400x300")
+        self.dialog.resizable(False, False)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # Center the dialog
+        self.dialog.geometry("+%d+%d" % (parent.winfo_rootx() + 50, parent.winfo_rooty() + 50))
+        
+        self._build_ui()
+        
+        # Wait for dialog to close
+        parent.wait_window(self.dialog)
+    
+    def _build_ui(self):
+        main_frame = ttk.Frame(self.dialog, padding=20)
+        main_frame.pack(fill="both", expand=True)
+        
+        # Formation name
+        ttk.Label(main_frame, text="Formation Name:").pack(anchor="w", pady=(0, 5))
+        self.name_var = tk.StringVar()
+        self.name_entry = ttk.Entry(main_frame, textvariable=self.name_var, width=40)
+        self.name_entry.pack(fill="x", pady=(0, 15))
+        self.name_entry.focus()
+        
+        # Formation type
+        ttk.Label(main_frame, text="Formation Type:").pack(anchor="w", pady=(0, 5))
+        self.type_var = tk.StringVar()
+        self.type_combo = ttk.Combobox(main_frame, textvariable=self.type_var, width=37)
+        self.type_combo['values'] = [ft.value for ft in FormationType]
+        self.type_combo.set("4-4-2")  # Default
+        self.type_combo.pack(fill="x", pady=(0, 15))
+        
+        # Description
+        ttk.Label(main_frame, text="Description (optional):").pack(anchor="w", pady=(0, 5))
+        self.desc_text = tk.Text(main_frame, width=40, height=6)
+        self.desc_text.pack(fill="both", expand=True, pady=(0, 15))
+        
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill="x")
+        
+        ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(side="right", padx=(5, 0))
+        ttk.Button(btn_frame, text="Create", command=self._create).pack(side="right")
+    
+    def _create(self):
+        name = self.name_var.get().strip()
+        if not name:
+            messagebox.showerror("Error", "Formation name is required.")
+            return
+        
+        formation_type = self.type_var.get()
+        description = self.desc_text.get(1.0, tk.END).strip()
+        
+        self.result = (name, formation_type, description)
+        self.dialog.destroy()
+    
+    def _cancel(self):
+        self.result = None
+        self.dialog.destroy()
+
+
+class TemplateSelectionDialog:
+    """Dialog for selecting formation templates."""
+    
+    def __init__(self, parent, templates):
+        self.result = None
+        self.templates = templates
+        
+        # Create dialog window
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Select Formation Template")
+        self.dialog.geometry("500x400")
+        self.dialog.resizable(False, False)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # Center the dialog
+        self.dialog.geometry("+%d+%d" % (parent.winfo_rootx() + 50, parent.winfo_rooty() + 50))
+        
+        self._build_ui()
+        
+        # Wait for dialog to close
+        parent.wait_window(self.dialog)
+    
+    def _build_ui(self):
+        main_frame = ttk.Frame(self.dialog, padding=20)
+        main_frame.pack(fill="both", expand=True)
+        
+        ttk.Label(main_frame, text="Select a formation template:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        # Template list
+        list_frame = ttk.Frame(main_frame)
+        list_frame.pack(fill="both", expand=True, pady=(0, 15))
+        
+        self.template_listbox = tk.Listbox(list_frame, height=10)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.template_listbox.yview)
+        self.template_listbox.configure(yscrollcommand=scrollbar.set)
+        
+        self.template_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Populate templates
+        for template in self.templates:
+            shape = template.get_formation_shape()
+            shape_str = f"{shape[1]}-{shape[2]}-{shape[3]}"
+            display_text = f"{template.name} ({shape_str})"
+            if template.description:
+                display_text += f" - {template.description}"
+            self.template_listbox.insert(tk.END, display_text)
+        
+        self.template_listbox.bind("<Double-Button-1>", lambda e: self._select_template())
+        
+        # Name for new formation
+        ttk.Label(main_frame, text="Name for new formation:").pack(anchor="w", pady=(15, 5))
+        self.name_var = tk.StringVar()
+        self.name_entry = ttk.Entry(main_frame, textvariable=self.name_var, width=50)
+        self.name_entry.pack(fill="x", pady=(0, 15))
+        
+        # Buttons
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill="x")
+        
+        ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(side="right", padx=(5, 0))
+        ttk.Button(btn_frame, text="Create from Template", command=self._select_template).pack(side="right")
+    
+    def _select_template(self):
+        selection = self.template_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a template.")
+            return
+        
+        name = self.name_var.get().strip()
+        if not name:
+            messagebox.showerror("Error", "Formation name is required.")
+            return
+        
+        selected_template = self.templates[selection[0]]
+        self.result = (selected_template, name)
+        self.dialog.destroy()
+    
+    def _cancel(self):
+        self.result = None
+        self.dialog.destroy()
 
 
 def run_tkinter_app() -> None:

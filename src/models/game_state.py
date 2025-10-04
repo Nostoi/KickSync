@@ -8,6 +8,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional
 
 from .player import Player
+from .formation import Formation
 from ..utils import DEFAULT_GAME_LENGTH_MIN, DEFAULT_PERIOD_COUNT
 
 
@@ -31,6 +32,9 @@ class GameState:
         period_stoppage: Stoppage/injury time tracked per period
         current_period_index: Index of active period (0-based)
         period_start_ts: Epoch timestamp when the current period started/resumed
+        current_formation: Active tactical formation for the game
+        starting_formation: Initial formation set for the game
+        opponent_notes: Scouting notes about the opponent team
     """
     roster: Dict[str, Player] = field(default_factory=dict)  # key by name (unique)
     # game timing
@@ -47,6 +51,10 @@ class GameState:
     period_stoppage: List[int] = field(default_factory=list)
     current_period_index: int = 0
     period_start_ts: Optional[float] = None
+    # tactical formations and strategy
+    current_formation: Optional[Formation] = None
+    starting_formation: Optional[Formation] = None
+    opponent_notes: str = ""
 
     def to_json(self) -> dict:
         """
@@ -55,7 +63,7 @@ class GameState:
         Returns:
             Dictionary representation suitable for JSON serialization
         """
-        return {
+        result = {
             "players": {k: asdict(v) for k, v in self.roster.items()},
             "scheduled_start_ts": self.scheduled_start_ts,
             "game_start_ts": self.game_start_ts,
@@ -70,7 +78,16 @@ class GameState:
             "period_stoppage": list(self.period_stoppage),
             "current_period_index": self.current_period_index,
             "period_start_ts": self.period_start_ts,
+            "opponent_notes": self.opponent_notes,
         }
+        
+        # Add formation data if present
+        if self.current_formation:
+            result["current_formation"] = self.current_formation.to_dict()
+        if self.starting_formation:
+            result["starting_formation"] = self.starting_formation.to_dict()
+            
+        return result
 
     @staticmethod
     def from_json(data: dict) -> "GameState":
@@ -118,6 +135,22 @@ class GameState:
         gs.current_period_index = int(data.get("current_period_index", 0))
         gs.period_start_ts = data.get("period_start_ts")
 
+        # Load formation data
+        gs.opponent_notes = data.get("opponent_notes", "")
+        
+        # Load formations if present
+        if "current_formation" in data and data["current_formation"]:
+            try:
+                gs.current_formation = Formation.from_dict(data["current_formation"])
+            except Exception:
+                gs.current_formation = None
+                
+        if "starting_formation" in data and data["starting_formation"]:
+            try:
+                gs.starting_formation = Formation.from_dict(data["starting_formation"])
+            except Exception:
+                gs.starting_formation = None
+
         gs.ensure_timer_lists()
         # Keep aggregate adjustment in sync with per-period values
         gs.elapsed_adjustment = sum(gs.period_adjustments[: gs.period_count])
@@ -144,3 +177,12 @@ class GameState:
 
         # Ensure timer fields are non-negative integers where applicable
         self.game_length_seconds = max(60, int(self.game_length_seconds or 0))
+    
+    def is_active(self) -> bool:
+        """
+        Check if the game is currently active (started).
+        
+        Returns:
+            True if the game has been started (has a start timestamp), False otherwise
+        """
+        return self.game_start_ts is not None

@@ -1,13 +1,70 @@
 """Timer service for the Soccer Coach Sideline Timekeeper application."""
 
-from typing import Dict, List, Optional, Tuple
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Tuple, Protocol
 
 from ..models import GameState
 from ..utils import now_ts, HALFTIME_PAUSE_MIN
 
 
+class GameTimerInterface(Protocol):
+    """Interface for basic game timing operations - ISP compliance."""
+    
+    def start_game(self) -> None:
+        """Start or resume the game timer."""
+        ...
+    
+    def pause_game(self) -> None:
+        """Pause the game timer."""
+        ...
+    
+    def get_game_elapsed_seconds(self) -> int:
+        """Get total elapsed game time in seconds."""
+        ...
+
+
+class PeriodManagerInterface(Protocol):
+    """Interface for period management operations - ISP compliance."""
+    
+    def start_next_period(self) -> bool:
+        """Advance to next period if possible."""
+        ...
+    
+    def get_current_period(self) -> int:
+        """Get current period number (1-based)."""
+        ...
+    
+    def get_period_summaries(self) -> List[Dict[str, any]]:
+        """Get summary of all periods."""
+        ...
+
+
+class GameConfigurationInterface(Protocol):
+    """Interface for game configuration - ISP compliance."""
+    
+    def configure_game(
+        self, 
+        *, 
+        game_length_minutes: Optional[int] = None,
+        period_count: Optional[int] = None
+    ) -> None:
+        """Configure game parameters."""
+        ...
+    
+    def get_timer_configuration(self) -> Dict[str, any]:
+        """Get current timer configuration."""
+        ...
+
+
 class TimerService:
-    """Service for managing game timing, periods, and adjustments."""
+    """
+    Comprehensive timer service implementing multiple focused interfaces.
+    
+    Follows ISP by providing separate interfaces for different concerns:
+    - GameTimerInterface: Basic timing operations
+    - PeriodManagerInterface: Period management
+    - GameConfigurationInterface: Configuration management
+    """
 
     def __init__(self, game_state: GameState):
         self.game_state = game_state

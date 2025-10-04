@@ -6,7 +6,7 @@ and their game state, including playing time tracking, position management,
 and enhanced player information.
 """
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
@@ -337,7 +337,7 @@ class Player:
         Returns:
             Attendance rate as percentage (0.0-100.0)
         """
-        cutoff_date = date.today() - datetime.timedelta(days=days)
+        cutoff_date = date.today() - timedelta(days=days)
         recent_attendance = [
             a for a in self.attendance_history if a.date >= cutoff_date
         ]
