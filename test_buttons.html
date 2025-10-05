@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Button Test</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        button { margin: 10px; padding: 10px 20px; font-size: 16px; }
+        #log { margin-top: 20px; padding: 10px; border: 1px solid #ccc; min-height: 100px; }
+    </style>
+</head>
+<body>
+    <h1>Button Test Page</h1>
+    <button id="btn1">Test Button 1</button>
+    <button id="btn2">Test Button 2</button>
+    <button onclick="logMessage('Inline onclick works!')">Inline onclick</button>
+    
+    <div id="log"></div>
+    
+    <script>
+        function logMessage(msg) {
+            const log = document.getElementById('log');
+            log.innerHTML += '<p>' + new Date().toLocaleTimeString() + ': ' + msg + '</p>';
+            console.log(msg);
+        }
+        
+        logMessage('Script loaded');
+        
+        // Test 1: Direct assignment
+        const btn1 = document.getElementById('btn1');
+        if (btn1) {
+            btn1.onclick = () => logMessage('Button 1 clicked via .onclick');
+            logMessage('Button 1 handler attached');
+        } else {
+            logMessage('ERROR: Button 1 not found!');
+        }
+        
+        // Test 2: addEventListener
+        const btn2 = document.getElementById('btn2');
+        if (btn2) {
+            btn2.addEventListener('click', () => logMessage('Button 2 clicked via addEventListener'));
+            logMessage('Button 2 handler attached');
+        } else {
+            logMessage('ERROR: Button 2 not found!');
+        }
+        
+        logMessage('All tests initialized');
+    </script>
+</body>
+</html>

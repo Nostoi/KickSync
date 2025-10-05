@@ -85,6 +85,178 @@
       "description": "Attacking formation with wingers and strong midfield triangle",
       "created_at": "2025-10-04T12:55:28.709387",
       "notes": ""
+    },
+    "Test 11-position": {
+      "name": "Test 11-position",
+      "formation_type": "4-4-2",
+      "positions": [
+        {
+          "x": 50,
+          "y": 10,
+          "position_code": "GK",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 30,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 35,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 40,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 45,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 50,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 55,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 60,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 65,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 70,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 75,
+          "position_code": "MID",
+          "player_name": null,
+          "player_number": null
+        }
+      ],
+      "description": "",
+      "created_at": "2025-10-04T18:15:04.982566",
+      "notes": ""
+    },
+    "new base": {
+      "name": "new base",
+      "formation_type": "4-3-3",
+      "positions": [
+        {
+          "x": 5,
+          "y": 50,
+          "position_code": "GK",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 25,
+          "y": 20,
+          "position_code": "LB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 20,
+          "y": 35,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 20,
+          "y": 65,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 25,
+          "y": 80,
+          "position_code": "RB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 30,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 45,
+          "y": 50,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 50,
+          "y": 70,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 80,
+          "y": 25,
+          "position_code": "LW",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 85,
+          "y": 50,
+          "position_code": "ST",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 80,
+          "y": 75,
+          "position_code": "RW",
+          "player_name": null,
+          "player_number": null
+        }
+      ],
+      "description": "",
+      "created_at": "2025-10-04T19:14:18.962042",
+      "notes": ""
     }
   },
   "substitution_plans": {},
