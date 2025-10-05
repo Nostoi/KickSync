@@ -83,8 +83,19 @@ def create_app(static_folder: str = ".") -> Flask:
     @app.route("/")
     def index():
         """Serve the main HTML interface."""
+        import time
         response = send_from_directory(static_folder, "index.html")
         # Add cache-busting headers for development
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        response.headers['ETag'] = str(int(time.time()))
+        return response
+
+    @app.route("/test")
+    def test_buttons():
+        """Serve the test buttons page."""
+        response = send_from_directory(static_folder, "test_buttons.html")
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'

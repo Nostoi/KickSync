@@ -802,8 +802,8 @@ function normalizeState() {
   state.breakActive = Boolean(state.breakActive);
   ensurePeriodArrays();
   
-  // Sync UI field size selector with state
-  if (ui.fieldSizeSelect) {
+  // Sync UI field size selector with state (only if ui is initialized)
+  if (typeof ui !== 'undefined' && ui.fieldSizeSelect) {
     ui.fieldSizeSelect.value = state.fieldSize;
   }
 }
@@ -869,7 +869,7 @@ function periodRemainingSeconds(index) {
   return Math.max(0, target - elapsed);
 }
 
-normalizeState();
+console.log('[DEBUG] Starting UI initialization...');
 
 let ui = {
   // nav
@@ -981,6 +981,12 @@ let ui = {
   btnCancelTemplate: document.getElementById("btnCancelTemplate"),
   btnCreateFromTemplate: document.getElementById("btnCreateFromTemplate"),
 };
+
+console.log('[DEBUG] UI object created');
+
+// Now that ui is defined, normalize state and sync UI
+normalizeState();
+console.log('[DEBUG] State normalized');
 
 let selectedSlotIndex = null;  // for lineup
 let selectedOutName = null;    // in-game OUT selection
@@ -1270,12 +1276,17 @@ function show(view) {
   });
 }
 
-ui.btnSetup.onclick = () => { show("setup"); };
-ui.btnPlayers.onclick = () => { show("players"); renderPlayers(); };
-ui.btnFormations.onclick = () => { show("formations"); renderFormations(); };
-ui.btnLineup.onclick = () => { show("lineup"); renderLineup(); };
-ui.btnGame.onclick = () => { show("game"); renderGame(); };
-ui.btnReports.onclick = () => { show("reports"); renderReports(); };
+console.log('[DEBUG] UI object created, btnSetup=', ui.btnSetup);
+console.log('[DEBUG] Attaching event handlers...');
+
+ui.btnSetup.onclick = () => { console.log('[DEBUG] Setup clicked'); show("setup"); };
+ui.btnPlayers.onclick = () => { console.log('[DEBUG] Players clicked'); show("players"); renderPlayers(); };
+ui.btnFormations.onclick = () => { console.log('[DEBUG] Formations clicked'); show("formations"); renderFormations(); };
+ui.btnLineup.onclick = () => { console.log('[DEBUG] Lineup clicked'); show("lineup"); renderLineup(); };
+ui.btnGame.onclick = () => { console.log('[DEBUG] Game clicked'); show("game"); renderGame(); };
+ui.btnReports.onclick = () => { console.log('[DEBUG] Reports clicked'); show("reports"); renderReports(); };
+
+console.log('[DEBUG] Event handlers attached successfully');
 if (ui.btnReportExport) ui.btnReportExport.onclick = downloadReportCsv;
 
 // Player management button handlers
@@ -2984,189 +2995,189 @@ async function createNewFormation() {
 function generateFormationPositions(type) {
   const positions = [];
   
-  // Always start with goalkeeper
-  positions.push({ x: 50, y: 5, position_code: 'GK' });
+  // Always start with goalkeeper (near left goal)
+  positions.push({ x: 5, y: 50, position_code: 'GK' });
   
   switch (type) {
     case '4-4-2':
       // Defenders
-      positions.push({ x: 20, y: 25, position_code: 'LB' });
-      positions.push({ x: 35, y: 20, position_code: 'CB' });
-      positions.push({ x: 65, y: 20, position_code: 'CB' });
-      positions.push({ x: 80, y: 25, position_code: 'RB' });
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 35, position_code: 'CB' });
+      positions.push({ x: 20, y: 65, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
       // Midfielders
-      positions.push({ x: 20, y: 55, position_code: 'LM' });
-      positions.push({ x: 40, y: 50, position_code: 'CM' });
-      positions.push({ x: 60, y: 50, position_code: 'CM' });
-      positions.push({ x: 80, y: 55, position_code: 'RM' });
+      positions.push({ x: 55, y: 20, position_code: 'LM' });
+      positions.push({ x: 50, y: 40, position_code: 'CM' });
+      positions.push({ x: 50, y: 60, position_code: 'CM' });
+      positions.push({ x: 55, y: 80, position_code: 'RM' });
       // Forwards
-      positions.push({ x: 40, y: 80, position_code: 'ST' });
-      positions.push({ x: 60, y: 80, position_code: 'ST' });
+      positions.push({ x: 80, y: 40, position_code: 'ST' });
+      positions.push({ x: 80, y: 60, position_code: 'ST' });
       break;
       
     case '4-3-3':
       // Defenders
-      positions.push({ x: 20, y: 25, position_code: 'LB' });
-      positions.push({ x: 35, y: 20, position_code: 'CB' });
-      positions.push({ x: 65, y: 20, position_code: 'CB' });
-      positions.push({ x: 80, y: 25, position_code: 'RB' });
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 35, position_code: 'CB' });
+      positions.push({ x: 20, y: 65, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
       // Midfielders
-      positions.push({ x: 30, y: 50, position_code: 'CM' });
-      positions.push({ x: 50, y: 45, position_code: 'CM' });
-      positions.push({ x: 70, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 30, position_code: 'CM' });
+      positions.push({ x: 45, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 70, position_code: 'CM' });
       // Forwards
-      positions.push({ x: 25, y: 80, position_code: 'LW' });
-      positions.push({ x: 50, y: 85, position_code: 'ST' });
-      positions.push({ x: 75, y: 80, position_code: 'RW' });
+      positions.push({ x: 80, y: 25, position_code: 'LW' });
+      positions.push({ x: 85, y: 50, position_code: 'ST' });
+      positions.push({ x: 80, y: 75, position_code: 'RW' });
       break;
       
     case '3-5-2':
       // Defenders
-      positions.push({ x: 30, y: 20, position_code: 'CB' });
-      positions.push({ x: 50, y: 18, position_code: 'CB' });
-      positions.push({ x: 70, y: 20, position_code: 'CB' });
+      positions.push({ x: 20, y: 30, position_code: 'CB' });
+      positions.push({ x: 18, y: 50, position_code: 'CB' });
+      positions.push({ x: 20, y: 70, position_code: 'CB' });
       // Midfielders
-      positions.push({ x: 15, y: 50, position_code: 'LM' });
-      positions.push({ x: 35, y: 45, position_code: 'CM' });
-      positions.push({ x: 50, y: 48, position_code: 'CM' });
-      positions.push({ x: 65, y: 45, position_code: 'CM' });
-      positions.push({ x: 85, y: 50, position_code: 'RM' });
+      positions.push({ x: 50, y: 15, position_code: 'LM' });
+      positions.push({ x: 45, y: 35, position_code: 'CM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 45, y: 65, position_code: 'CM' });
+      positions.push({ x: 50, y: 85, position_code: 'RM' });
       // Forwards
-      positions.push({ x: 40, y: 80, position_code: 'ST' });
-      positions.push({ x: 60, y: 80, position_code: 'ST' });
+      positions.push({ x: 80, y: 40, position_code: 'ST' });
+      positions.push({ x: 80, y: 60, position_code: 'ST' });
       break;
       
     case '4-5-1':
       // Defenders
-      positions.push({ x: 20, y: 25, position_code: 'LB' });
-      positions.push({ x: 35, y: 20, position_code: 'CB' });
-      positions.push({ x: 65, y: 20, position_code: 'CB' });
-      positions.push({ x: 80, y: 25, position_code: 'RB' });
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 35, position_code: 'CB' });
+      positions.push({ x: 20, y: 65, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
       // Midfielders
-      positions.push({ x: 15, y: 55, position_code: 'LM' });
-      positions.push({ x: 30, y: 50, position_code: 'CM' });
-      positions.push({ x: 50, y: 48, position_code: 'CM' });
-      positions.push({ x: 70, y: 50, position_code: 'CM' });
-      positions.push({ x: 85, y: 55, position_code: 'RM' });
+      positions.push({ x: 55, y: 15, position_code: 'LM' });
+      positions.push({ x: 50, y: 30, position_code: 'CM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 70, position_code: 'CM' });
+      positions.push({ x: 55, y: 85, position_code: 'RM' });
       // Forward
-      positions.push({ x: 50, y: 85, position_code: 'ST' });
+      positions.push({ x: 85, y: 50, position_code: 'ST' });
       break;
       
     case '3-4-3':
       // Defenders
-      positions.push({ x: 30, y: 20, position_code: 'CB' });
-      positions.push({ x: 50, y: 18, position_code: 'CB' });
-      positions.push({ x: 70, y: 20, position_code: 'CB' });
+      positions.push({ x: 20, y: 30, position_code: 'CB' });
+      positions.push({ x: 18, y: 50, position_code: 'CB' });
+      positions.push({ x: 20, y: 70, position_code: 'CB' });
       // Midfielders
-      positions.push({ x: 25, y: 50, position_code: 'LM' });
-      positions.push({ x: 40, y: 48, position_code: 'CM' });
-      positions.push({ x: 60, y: 48, position_code: 'CM' });
-      positions.push({ x: 75, y: 50, position_code: 'RM' });
+      positions.push({ x: 50, y: 25, position_code: 'LM' });
+      positions.push({ x: 48, y: 40, position_code: 'CM' });
+      positions.push({ x: 48, y: 60, position_code: 'CM' });
+      positions.push({ x: 50, y: 75, position_code: 'RM' });
       // Forwards
-      positions.push({ x: 25, y: 80, position_code: 'LW' });
-      positions.push({ x: 50, y: 85, position_code: 'ST' });
-      positions.push({ x: 75, y: 80, position_code: 'RW' });
+      positions.push({ x: 80, y: 25, position_code: 'LW' });
+      positions.push({ x: 85, y: 50, position_code: 'ST' });
+      positions.push({ x: 80, y: 75, position_code: 'RW' });
       break;
       
     case '5-3-2':
       // Defenders
-      positions.push({ x: 15, y: 28, position_code: 'LB' });
-      positions.push({ x: 30, y: 22, position_code: 'CB' });
-      positions.push({ x: 50, y: 20, position_code: 'CB' });
-      positions.push({ x: 70, y: 22, position_code: 'CB' });
-      positions.push({ x: 85, y: 28, position_code: 'RB' });
+      positions.push({ x: 28, y: 15, position_code: 'LB' });
+      positions.push({ x: 22, y: 30, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 70, position_code: 'CB' });
+      positions.push({ x: 28, y: 85, position_code: 'RB' });
       // Midfielders
-      positions.push({ x: 30, y: 55, position_code: 'CM' });
-      positions.push({ x: 50, y: 52, position_code: 'CM' });
-      positions.push({ x: 70, y: 55, position_code: 'CM' });
+      positions.push({ x: 55, y: 30, position_code: 'CM' });
+      positions.push({ x: 52, y: 50, position_code: 'CM' });
+      positions.push({ x: 55, y: 70, position_code: 'CM' });
       // Forwards
-      positions.push({ x: 40, y: 82, position_code: 'ST' });
-      positions.push({ x: 60, y: 82, position_code: 'ST' });
+      positions.push({ x: 82, y: 40, position_code: 'ST' });
+      positions.push({ x: 82, y: 60, position_code: 'ST' });
       break;
       
     // 7v7 Formations
     case '2-3-1':
       // Defenders
-      positions.push({ x: 35, y: 22, position_code: 'CB' });
-      positions.push({ x: 65, y: 22, position_code: 'CB' });
+      positions.push({ x: 22, y: 35, position_code: 'CB' });
+      positions.push({ x: 22, y: 65, position_code: 'CB' });
       // Midfielders
-      positions.push({ x: 25, y: 50, position_code: 'LM' });
-      positions.push({ x: 50, y: 48, position_code: 'CM' });
-      positions.push({ x: 75, y: 50, position_code: 'RM' });
+      positions.push({ x: 50, y: 25, position_code: 'LM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 75, position_code: 'RM' });
       // Forward
-      positions.push({ x: 50, y: 80, position_code: 'ST' });
+      positions.push({ x: 80, y: 50, position_code: 'ST' });
       break;
       
     case '3-2-1':
       // Defenders
-      positions.push({ x: 25, y: 22, position_code: 'CB' });
-      positions.push({ x: 50, y: 20, position_code: 'CB' });
-      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
       // Midfielders
-      positions.push({ x: 35, y: 50, position_code: 'CM' });
-      positions.push({ x: 65, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 35, position_code: 'CM' });
+      positions.push({ x: 50, y: 65, position_code: 'CM' });
       // Forward
-      positions.push({ x: 50, y: 80, position_code: 'ST' });
+      positions.push({ x: 80, y: 50, position_code: 'ST' });
       break;
       
     // 9v9 Formations
     case '3-3-2':
       // Defenders
-      positions.push({ x: 25, y: 22, position_code: 'CB' });
-      positions.push({ x: 50, y: 20, position_code: 'CB' });
-      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
       // Midfielders
-      positions.push({ x: 25, y: 50, position_code: 'LM' });
-      positions.push({ x: 50, y: 48, position_code: 'CM' });
-      positions.push({ x: 75, y: 50, position_code: 'RM' });
+      positions.push({ x: 50, y: 25, position_code: 'LM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 75, position_code: 'RM' });
       // Forwards
-      positions.push({ x: 40, y: 78, position_code: 'ST' });
-      positions.push({ x: 60, y: 78, position_code: 'ST' });
+      positions.push({ x: 78, y: 40, position_code: 'ST' });
+      positions.push({ x: 78, y: 60, position_code: 'ST' });
       break;
       
     case '3-2-3':
       // Defenders
-      positions.push({ x: 25, y: 22, position_code: 'CB' });
-      positions.push({ x: 50, y: 20, position_code: 'CB' });
-      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
       // Midfielders
-      positions.push({ x: 35, y: 48, position_code: 'CM' });
-      positions.push({ x: 65, y: 48, position_code: 'CM' });
+      positions.push({ x: 48, y: 35, position_code: 'CM' });
+      positions.push({ x: 48, y: 65, position_code: 'CM' });
       // Forwards
-      positions.push({ x: 25, y: 78, position_code: 'LW' });
-      positions.push({ x: 50, y: 82, position_code: 'ST' });
-      positions.push({ x: 75, y: 78, position_code: 'RW' });
+      positions.push({ x: 78, y: 25, position_code: 'LW' });
+      positions.push({ x: 82, y: 50, position_code: 'ST' });
+      positions.push({ x: 78, y: 75, position_code: 'RW' });
       break;
       
     // 10v10 Formations
     case '3-4-2':
       // Defenders
-      positions.push({ x: 25, y: 22, position_code: 'CB' });
-      positions.push({ x: 50, y: 20, position_code: 'CB' });
-      positions.push({ x: 75, y: 22, position_code: 'CB' });
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
       // Midfielders
-      positions.push({ x: 20, y: 50, position_code: 'LM' });
-      positions.push({ x: 40, y: 48, position_code: 'CM' });
-      positions.push({ x: 60, y: 48, position_code: 'CM' });
-      positions.push({ x: 80, y: 50, position_code: 'RM' });
+      positions.push({ x: 50, y: 20, position_code: 'LM' });
+      positions.push({ x: 48, y: 40, position_code: 'CM' });
+      positions.push({ x: 48, y: 60, position_code: 'CM' });
+      positions.push({ x: 50, y: 80, position_code: 'RM' });
       // Forwards
-      positions.push({ x: 40, y: 78, position_code: 'ST' });
-      positions.push({ x: 60, y: 78, position_code: 'ST' });
+      positions.push({ x: 78, y: 40, position_code: 'ST' });
+      positions.push({ x: 78, y: 60, position_code: 'ST' });
       break;
       
     case '4-3-2':
       // Defenders
-      positions.push({ x: 20, y: 25, position_code: 'LB' });
-      positions.push({ x: 40, y: 20, position_code: 'CB' });
-      positions.push({ x: 60, y: 20, position_code: 'CB' });
-      positions.push({ x: 80, y: 25, position_code: 'RB' });
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 40, position_code: 'CB' });
+      positions.push({ x: 20, y: 60, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
       // Midfielders
-      positions.push({ x: 30, y: 50, position_code: 'CM' });
-      positions.push({ x: 50, y: 48, position_code: 'CM' });
-      positions.push({ x: 70, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 30, position_code: 'CM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 70, position_code: 'CM' });
       // Forwards
-      positions.push({ x: 40, y: 78, position_code: 'ST' });
-      positions.push({ x: 60, y: 78, position_code: 'ST' });
+      positions.push({ x: 78, y: 40, position_code: 'ST' });
+      positions.push({ x: 78, y: 60, position_code: 'ST' });
       break;
       
     default:
@@ -3416,10 +3427,16 @@ function renderAll() {
   renderPlayers();
   renderFormations();
 }
+
+console.log('[DEBUG] Starting initialization...');
 loadLocal();
+console.log('[DEBUG] Local state loaded');
 renderAll();
+console.log('[DEBUG] All views rendered');
 show("setup");
+console.log('[DEBUG] Showing setup view');
 startTick(); // keep countdown labels alive even when paused
+console.log('[DEBUG] Application fully initialized and ready!');
 </script>
 </body>
 </html>
