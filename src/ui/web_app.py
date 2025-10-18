@@ -188,8 +188,13 @@ def create_app(static_folder: str = ".") -> Flask:
             print(f"DEBUG: Timer start request received. Content-Type: {request.content_type}")
             print(f"DEBUG: Request data: {request.get_data()}")
             
-            # Check if game is already active
-            if app_state.game_state.is_active():
+            # Check if game is already running (active and not paused)
+            # Allow starting if game is paused (resume functionality)
+            is_active = app_state.game_state.is_active()
+            is_paused = app_state.game_state.paused
+            print(f"DEBUG: Game state check - is_active: {is_active}, is_paused: {is_paused}")
+            
+            if is_active and not is_paused:
                 return jsonify({
                     "success": False,
                     "error": "Game is already in progress",

@@ -1672,10 +1672,13 @@ ui.btnClearAssign.onclick = () => {
 };
 
 ui.btnStartGame.onclick = async () => {
+  console.log('[DEBUG] Start Game button clicked');
   try {
     // Disable button to prevent double-clicking
     ui.btnStartGame.disabled = true;
     ui.btnStartGame.textContent = 'Validating...';
+    
+    console.log('[DEBUG] Starting validation...');
     
     // Build assignments (excluding header)
     const assigned = {};
@@ -1700,10 +1703,14 @@ ui.btnStartGame.onclick = async () => {
     
     // Calculate required positions dynamically from the lineup slots
     const requiredSlots = getRequiredSlots();
+    console.log('[DEBUG] Required slots:', requiredSlots);
+    
     const need = {GK: 0, DF: 0, MF: 0, ST: 0};
     requiredSlots.forEach(pos => {
       need[pos] = (need[pos] || 0) + 1;
     });
+    
+    console.log('[DEBUG] Calculated needs:', need);
     
     const got = {
       GK: (assigned.GK || []).length, 
@@ -1711,6 +1718,8 @@ ui.btnStartGame.onclick = async () => {
       MF: (assigned.MF || []).length, 
       ST: (assigned.ST || []).length
     };
+    
+    console.log('[DEBUG] Got assignments:', got);
     
     // Check formation completeness
     const validationErrors = [];
