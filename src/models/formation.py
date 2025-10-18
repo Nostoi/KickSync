@@ -18,6 +18,9 @@ class FormationType(Enum):
     F_5_4_1 = "5-4-1"
     F_4_5_1 = "4-5-1"
     F_5_3_2 = "5-3-2"
+    # Smaller field formations
+    F_3_3_3 = "3-3-3"  # 10v10
+    F_3_2_3 = "3-2-3"  # 9v9
     CUSTOM = "Custom"
 
 
@@ -397,12 +400,73 @@ class FormationTemplates:
         )
     
     @staticmethod
+    def create_3_3_3() -> Formation:
+        """Create a 3-3-3 formation template for 10v10."""
+        positions = [
+            # Goalkeeper (left side, near left goal)
+            FieldPosition(5, 50, Position.GOALKEEPER),
+            
+            # Defenders (3)
+            FieldPosition(22, 25, Position.CENTER_BACK),
+            FieldPosition(20, 50, Position.CENTER_BACK),
+            FieldPosition(22, 75, Position.CENTER_BACK),
+            
+            # Midfielders (3)
+            FieldPosition(48, 30, Position.CENTRAL_MIDFIELDER),
+            FieldPosition(48, 50, Position.CENTRAL_MIDFIELDER),
+            FieldPosition(48, 70, Position.CENTRAL_MIDFIELDER),
+            
+            # Forwards (3)
+            FieldPosition(78, 25, Position.LEFT_WINGER),
+            FieldPosition(82, 50, Position.STRIKER),
+            FieldPosition(78, 75, Position.RIGHT_WINGER),
+        ]
+        
+        return Formation(
+            name="3-3-3 Balanced (10v10)",
+            formation_type=FormationType.F_3_3_3,
+            positions=positions,
+            description="Balanced 10v10 formation with equal distribution across defense, midfield, and attack"
+        )
+    
+    @staticmethod
+    def create_3_2_3() -> Formation:
+        """Create a 3-2-3 formation template for 9v9."""
+        positions = [
+            # Goalkeeper (left side, near left goal)
+            FieldPosition(5, 50, Position.GOALKEEPER),
+            
+            # Defenders (3)
+            FieldPosition(22, 25, Position.CENTER_BACK),
+            FieldPosition(20, 50, Position.CENTER_BACK),
+            FieldPosition(22, 75, Position.CENTER_BACK),
+            
+            # Midfielders (2)
+            FieldPosition(48, 35, Position.CENTRAL_MIDFIELDER),
+            FieldPosition(48, 65, Position.CENTRAL_MIDFIELDER),
+            
+            # Forwards (3)
+            FieldPosition(78, 25, Position.LEFT_WINGER),
+            FieldPosition(82, 50, Position.STRIKER),
+            FieldPosition(78, 75, Position.RIGHT_WINGER),
+        ]
+        
+        return Formation(
+            name="3-2-3 Attack (9v9)",
+            formation_type=FormationType.F_3_2_3,
+            positions=positions,
+            description="Attacking 9v9 formation with strong defensive line and three forwards"
+        )
+    
+    @staticmethod
     def get_all_templates() -> List[Formation]:
         """Get all pre-defined formation templates."""
         return [
             FormationTemplates.create_4_4_2(),
             FormationTemplates.create_4_3_3(),
-            FormationTemplates.create_3_5_2()
+            FormationTemplates.create_3_5_2(),
+            FormationTemplates.create_3_3_3(),  # 10v10
+            FormationTemplates.create_3_2_3(),  # 9v9
         ]
     
     @staticmethod
@@ -411,7 +475,9 @@ class FormationTemplates:
         templates = {
             FormationType.F_4_4_2: FormationTemplates.create_4_4_2,
             FormationType.F_4_3_3: FormationTemplates.create_4_3_3,
-            FormationType.F_3_5_2: FormationTemplates.create_3_5_2
+            FormationType.F_3_5_2: FormationTemplates.create_3_5_2,
+            FormationType.F_3_3_3: FormationTemplates.create_3_3_3,
+            FormationType.F_3_2_3: FormationTemplates.create_3_2_3,
         }
         
         factory = templates.get(formation_type)
