@@ -257,6 +257,157 @@
       "description": "",
       "created_at": "2025-10-04T19:14:18.962042",
       "notes": ""
+    },
+    "10v10": {
+      "name": "10v10",
+      "formation_type": "3-3-3",
+      "positions": [
+        {
+          "x": 5,
+          "y": 50,
+          "position_code": "GK",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 22,
+          "y": 25,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 20,
+          "y": 50,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 22,
+          "y": 75,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 48,
+          "y": 30,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 48,
+          "y": 50,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 48,
+          "y": 70,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 78,
+          "y": 25,
+          "position_code": "LW",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 82,
+          "y": 50,
+          "position_code": "ST",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 78,
+          "y": 75,
+          "position_code": "RW",
+          "player_name": null,
+          "player_number": null
+        }
+      ],
+      "description": "Balanced 10v10 formation with equal distribution across defense, midfield, and attack",
+      "created_at": "2025-10-18T10:18:36.964849",
+      "notes": ""
+    },
+    "9v9": {
+      "name": "9v9",
+      "formation_type": "3-2-3",
+      "positions": [
+        {
+          "x": 5,
+          "y": 50,
+          "position_code": "GK",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 22,
+          "y": 25,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 20,
+          "y": 50,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 22,
+          "y": 75,
+          "position_code": "CB",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 48,
+          "y": 35,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 48,
+          "y": 65,
+          "position_code": "CM",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 78,
+          "y": 25,
+          "position_code": "LW",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 82,
+          "y": 50,
+          "position_code": "ST",
+          "player_name": null,
+          "player_number": null
+        },
+        {
+          "x": 78,
+          "y": 75,
+          "position_code": "RW",
+          "player_name": null,
+          "player_number": null
+        }
+      ],
+      "description": "Attacking 9v9 formation with strong defensive line and three forwards",
+      "created_at": "2025-10-18T10:21:39.965814",
+      "notes": ""
     }
   },
   "substitution_plans": {},
