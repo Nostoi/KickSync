@@ -735,9 +735,46 @@ function showNotification(message, type = 'info') {
 const GAME_LENGTH_MIN = 60;
 const HALFTIME_MIN = 10.5;
 const PERIOD_LABELS = {1: "Full Time", 2: "Half", 3: "Third", 4: "Quarter"};
-const REQUIRED_SLOTS = ["GK","DF","DF","DF","MF","MF","ST","ST","ST"];
 const POS_FULL = {GK:"Goalkeeper", DF:"Defender", MF:"Midfielder", ST:"Striker"};
 const FAIRNESS_THRESHOLD = 120; // seconds
+
+// Function to get required slots based on field size or formation
+function getRequiredSlots() {
+  // If there's a current formation selected, use its positions
+  if (currentFormation && currentFormation.positions && currentFormation.positions.length > 0) {
+    return currentFormation.positions.map(pos => {
+      const code = pos.position_code;
+      // Map position codes to simplified versions
+      if (code.includes('GK') || code === 'GOALKEEPER') return 'GK';
+      if (code.includes('LB') || code.includes('RB') || code.includes('CB') || code.includes('DF') || code === 'DEFENDER') return 'DF';
+      if (code.includes('LM') || code.includes('RM') || code.includes('CM') || code.includes('CAM') || code.includes('CDM') || code.includes('MF') || code === 'MIDFIELDER') return 'MF';
+      if (code.includes('LW') || code.includes('RW') || code.includes('ST') || code.includes('CF') || code.includes('FOR') || code === 'FORWARD') return 'ST';
+      return 'MF'; // default to midfielder
+    });
+  }
+  
+  // Otherwise, generate based on field size
+  const fieldSize = state.fieldSize || 11;
+  const slots = ['GK']; // Always start with goalkeeper
+  const outfield = fieldSize - 1;
+  
+  // Distribute remaining positions based on field size
+  if (fieldSize === 7) {
+    // 2-3-1: 2 DF, 3 MF, 1 ST
+    slots.push('DF', 'DF', 'MF', 'MF', 'MF', 'ST');
+  } else if (fieldSize === 9) {
+    // 3-2-3: 3 DF, 2 MF, 3 ST
+    slots.push('DF', 'DF', 'DF', 'MF', 'MF', 'ST', 'ST', 'ST');
+  } else if (fieldSize === 10) {
+    // 3-3-3: 3 DF, 3 MF, 3 ST
+    slots.push('DF', 'DF', 'DF', 'MF', 'MF', 'MF', 'ST', 'ST', 'ST');
+  } else {
+    // 11v11 default: 3-3-4 (3 DF, 3 MF, 4 ST for flexibility)
+    slots.push('DF', 'DF', 'DF', 'MF', 'MF', 'MF', 'ST', 'ST', 'ST', 'ST');
+  }
+  
+  return slots;
+}
 
 let state = {
   players: [], // {name, number, preferred, totalSec, onField, position, stintStart}
@@ -1500,9 +1537,10 @@ ui.btnApplyManual.onclick = () => {
  *  Lineup
  *  ------------------------- */
 function renderLineup() {
-  // slots
+  // slots - get dynamic slots based on formation or field size
+  const requiredSlots = getRequiredSlots();
   ui.slotList.innerHTML = "";
-  REQUIRED_SLOTS.forEach((pos, idx)=>{
+  requiredSlots.forEach((pos, idx)=>{
     const li = document.createElement("li");
     li.style.padding="6px 8px";
     li.style.border="1px solid var(--line)";
@@ -1606,8 +1644,11 @@ function assignSelectedSlot(playerName) {
   const existing = Array.from(ui.assignTable.querySelectorAll("tbody tr td:nth-child(2)")).map(td=>td.textContent);
   if (existing.includes(playerName)) { alert("Player already assigned."); return; }
 
+  // Get dynamic slots
+  const requiredSlots = getRequiredSlots();
+  
   // remove previous assignment on this slot (excluding header)
-  const slotLabel = `${selectedSlotIndex+1}. ${REQUIRED_SLOTS[selectedSlotIndex]}`;
+  const slotLabel = `${selectedSlotIndex+1}. ${requiredSlots[selectedSlotIndex]}`;
   const rows = Array.from(ui.assignTable.querySelectorAll("tbody tr"));
   for (const r of rows) {
     if (r.children[0].textContent === slotLabel) r.remove();
