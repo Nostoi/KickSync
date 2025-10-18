@@ -1698,8 +1698,13 @@ ui.btnStartGame.onclick = async () => {
       assigned[pos] = (assigned[pos] || []).concat([name]);
     });
     
-    // Enhanced validation
-    const need = {GK: 1, DF: 3, MF: 2, ST: 3};
+    // Calculate required positions dynamically from the lineup slots
+    const requiredSlots = getRequiredSlots();
+    const need = {GK: 0, DF: 0, MF: 0, ST: 0};
+    requiredSlots.forEach(pos => {
+      need[pos] = (need[pos] || 0) + 1;
+    });
+    
     const got = {
       GK: (assigned.GK || []).length, 
       DF: (assigned.DF || []).length, 
@@ -1712,6 +1717,7 @@ ui.btnStartGame.onclick = async () => {
     const warnings = [];
     
     for (const [position, required] of Object.entries(need)) {
+      if (required === 0) continue; // Skip positions not needed
       const actual = got[position];
       if (actual < required) {
         validationErrors.push(`Need ${required} ${position} player(s), only have ${actual}`);
