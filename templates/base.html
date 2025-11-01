@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}Sideline Timekeeper{% endblock %}</title>
+  {% block head_styles %}
+    {% if not dev_server_url and asset_entry %}
+      {% for css_file in asset_entry.get("css", []) %}
+        <link rel="stylesheet" href="{{ url_for('static', filename='web_dist/' + css_file) }}">
+      {% endfor %}
+    {% endif %}
+  {% endblock %}
+  {% block head_scripts %}
+    {% if dev_server_url %}
+      <script type="module" src="{{ dev_server_url }}/@vite/client"></script>
+      <script type="module" src="{{ dev_server_url }}/src/main.js"></script>
+    {% endif %}
+  {% endblock %}
+</head>
+<body>
+  {% block content %}{% endblock %}
+  {% block body_scripts %}
+    {% if not dev_server_url and asset_entry %}
+      <script type="module" src="{{ url_for('static', filename='web_dist/' + asset_entry["file"]) }}"></script>
+    {% endif %}
+  {% endblock %}
+</body>
+</html>

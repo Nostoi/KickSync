@@ -22,13 +22,19 @@ try:
         
 except ImportError:
     # Fallback to original implementation if new structure not available
-    from flask import Flask, send_from_directory
+    from flask import Flask, render_template
 
-    app = Flask(__name__, static_folder=".", static_url_path="")
+    PROJECT_ROOT = os.path.dirname(__file__)
+    app = Flask(
+        __name__,
+        static_folder=PROJECT_ROOT,
+        static_url_path="",
+        template_folder=os.path.join(PROJECT_ROOT, "templates"),
+    )
 
     @app.route("/")
     def index():
-        return send_from_directory(".", "index.html")
+        return render_template("index.html", dev_server_url=None, asset_entry=None)
 
     if __name__ == "__main__":
         # Bind only to localhost; Cloudflare Tunnel will connect locally.

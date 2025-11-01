@@ -14,8 +14,9 @@ The Soccer Coach application is a **Sideline Timekeeper** tool designed to help 
 
 1. **`app.py`** - Flask web server that serves the HTML interface
 2. **`coach_timer.py`** - Main Tkinter desktop application (726 lines)
-3. **`index.html`** - Web-based interface with embedded CSS and JavaScript (733 lines)
-4. **`coach_timer.py.save`** - Backup file
+3. **`frontend/`** - Modular web assets (ES modules + CSS) built with Vite
+4. **`templates/`** - Flask templates bridging Python and bundled assets
+5. **`coach_timer.py.save`** - Backup file
 
 ### Key Features
 

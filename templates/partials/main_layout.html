@@ -1,0 +1,397 @@
+<header>
+  <h1>Sideline Timekeeper</h1>
+  <div class="grow"></div>
+  <div class="toolbar">
+    <button class="btn" id="btnSetup">Setup</button>
+    <button class="btn" id="btnPlayers">Players</button>
+    <button class="btn" id="btnFormations">Formations</button>
+    <button class="btn" id="btnLineup">Lineup</button>
+    <button class="btn" id="btnGame">Game</button>
+    <button class="btn" id="btnReports">Reports</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- Setup -->
+  <section class="panel" id="viewSetup">
+    <div class="section-title">1) Roster</div>
+    <div class="grid cols-2">
+      <div>
+        <label class="hint">Enter one per line: <b>Name[,Number][,Preferred (e.g. ST,MF)]</b></label>
+        <textarea id="rosterInput" placeholder="Alice,10,ST&#10;Ben,7,MF,DF&#10;Casey,22,DF&#10;..."></textarea>
+        <div class="row" style="margin-top:8px">
+          <label>Field Size:</label>
+          <select id="fieldSizeSelect" style="max-width:140px">
+            <option value="7">7v7</option>
+            <option value="9">9v9</option>
+            <option value="10">10v10</option>
+            <option value="11" selected>11v11 (Standard)</option>
+          </select>
+          <span class="hint" style="margin-left:8px">Select players per team</span>
+        </div>
+        <div class="row">
+          <button class="btn" id="btnExample">Use Example 17-Player Roster</button>
+          <button class="btn primary" id="btnLoadRoster">Apply Roster</button>
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Save / Load Game</div>
+        <div class="row">
+          <button class="btn" id="btnSave">Save Game (JSON)</button>
+          <input type="file" id="fileLoad" accept=".json" class="hidden" />
+          <button class="btn" id="btnLoad">Load Game (JSON)</button>
+          <button class="btn ghost" id="btnClear">Clear All</button>
+        </div>
+        <div class="divider"></div>
+        <div class="section-title">Scheduled Start & Halftime</div>
+        <div class="row">
+          <label>Schedule (today, 24h):</label>
+          <input id="scheduledHHMM" placeholder="14:30" style="max-width:160px" />
+          <button class="btn" id="btnSetSchedule">Set</button>
+          <span class="hint" id="scheduledLabel"></span>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="btnStart">Start / Resume</button>
+          <button class="btn" id="btnPause">Pause</button>
+          <button class="btn" id="btnHalftime">Start Halftime (10.5m)</button>
+          <button class="btn" id="btnEndHalftime">Force End Halftime</button>
+        </div>
+        <div class="divider"></div>
+        <div class="section-title">Timer Configuration</div>
+        <div class="row">
+          <label>Regulation Minutes:</label>
+          <input id="formatMinutes" type="number" min="10" max="120" step="5" style="max-width:120px" />
+          <label>Periods:</label>
+          <select id="formatPeriods" style="max-width:140px">
+            <option value="1">1 Full Time</option>
+            <option value="2" selected>2 Halves</option>
+            <option value="3">3 Thirds</option>
+            <option value="4">4 Quarters</option>
+          </select>
+          <button class="btn" id="btnApplyFormat">Apply Format</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label>Manual Time:</label>
+          <select id="adjustKind" style="max-width:180px">
+            <option value="adjustment">Adjustment (+/-)</option>
+            <option value="stoppage">Stoppage / Injury</option>
+          </select>
+          <select id="adjustPeriod" style="max-width:160px"></select>
+          <input id="adjustSeconds" placeholder="Seconds" style="max-width:120px" />
+          <label class="hint"><input type="checkbox" id="adjustAll" style="margin-right:4px" />All periods</label>
+          <button class="btn" id="btnApplyManual">Apply</button>
+        </div>
+        <p class="hint">Tip: Save at kickoff, halftime, and full time. State also persists in your browser (localStorage).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Players -->
+  <section class="panel hidden" id="viewPlayers">
+    <div class="section-title">Player Management</div>
+    
+    <!-- Player Actions Toolbar -->
+    <div class="toolbar">
+      <button class="btn primary" id="btnAddPlayer">Add Player</button>
+      <button class="btn" id="btnImportPlayers">Import Players</button>
+      <button class="btn" id="btnExportPlayers">Export Players</button>
+      <button class="btn" id="btnUpdateStats">Update Statistics</button>
+      <button class="btn" id="btnMarkAttendance">Mark Attendance</button>
+    </div>
+    
+    <div class="grid cols-2" style="margin-top: 12px;">
+      <!-- Player List -->
+      <div>
+        <div class="section-title">Team Roster</div>
+        <table id="playersTable">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>#</th>
+              <th>Age</th>
+              <th>Positions</th>
+              <th>Games</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="playersTableBody">
+            <!-- Players will be populated here -->
+          </tbody>
+        </table>
+      </div>
+      
+      <!-- Player Details Panel -->
+      <div>
+        <div class="section-title">Player Details</div>
+        <div id="playerDetailsPanel">
+          <p class="hint">Select a player from the list to view details</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Formations -->
+  <section class="panel hidden" id="viewFormations">
+    <div class="section-title">Formation Editor & Tactical Planning</div>
+    
+    <div class="grid cols-2">
+      <!-- Left Panel - Formation Management -->
+      <div>
+        <div class="section-title">Formation Management</div>
+        
+        <!-- Formation Selection -->
+        <div class="panel">
+          <div class="section-title">Select Formation</div>
+          <select id="formationSelect" style="margin-bottom:12px;">
+            <option value="">-- Select Formation --</option>
+          </select>
+          
+          <div class="row" style="margin-bottom:8px;">
+            <button class="btn" id="btnNewFormation">New</button>
+            <button class="btn" id="btnFromTemplate">From Template</button>
+            <button class="btn" id="btnDeleteFormation">Delete</button>
+          </div>
+        </div>
+        
+        <!-- Formation Details -->
+        <div class="panel">
+          <div class="section-title">Formation Details</div>
+          <div style="margin-bottom:8px;">
+            <label class="hint">Name</label>
+            <input id="formationName" placeholder="Formation name" />
+          </div>
+          <div style="margin-bottom:8px;">
+            <label class="hint">Type</label>
+            <select id="formationType">
+              <option value="4-4-2">4-4-2</option>
+              <option value="4-3-3">4-3-3</option>
+              <option value="3-5-2">3-5-2</option>
+              <option value="4-5-1">4-5-1</option>
+              <option value="3-4-3">3-4-3</option>
+              <option value="5-3-2">5-3-2</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label class="hint">Description</label>
+            <textarea id="formationDescription" placeholder="Formation description..." rows="3"></textarea>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="btnSaveFormation">Save Formation</button>
+          </div>
+        </div>
+        
+        <!-- Quick Actions -->
+        <div class="panel">
+          <div class="section-title">Quick Actions</div>
+          <button class="btn" id="btnAutoAssign" style="width:100%; margin-bottom:8px;">Auto-Assign Players</button>
+          <button class="btn ghost" id="btnClearAssignments" style="width:100%; margin-bottom:8px;">Clear All Assignments</button>
+          <button class="btn" id="btnSuggestFormation" style="width:100%;">Suggest Formation</button>
+        </div>
+      </div>
+      
+      <!-- Right Panel - Field Visualization -->
+      <div>
+        <div class="section-title">Field Visualization</div>
+        <div class="panel">
+          <div id="fieldContainer" style="position:relative; width:100%; height:400px; background:linear-gradient(to bottom, #4a8f3a 0%, #2d6b22 100%); border:2px solid white; border-radius:8px; overflow:hidden;">
+            <!-- Field markings will be drawn here -->
+            <div id="fieldMarkings" style="position:absolute; inset:0; pointer-events:none;"></div>
+            <div id="formationPositions" style="position:absolute; inset:0;"></div>
+          </div>
+          
+          <div style="margin-top:12px; text-align:center;">
+            <div id="formationInfo" class="hint">No formation selected</div>
+          </div>
+        </div>
+        
+        <!-- Player Assignment -->
+        <div class="panel">
+          <div class="section-title">Player Assignments</div>
+          <div id="positionAssignments" style="max-height:200px; overflow-y:auto;">
+            <div class="hint">Select a formation to assign players</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Formation Templates Modal -->
+    <div id="templateModal" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:1000;">
+      <div class="panel" style="width:500px; max-height:80vh; overflow-y:auto;">
+        <div class="section-title">Select Formation Template</div>
+        <div id="templateList" style="margin-bottom:16px;">
+          <!-- Template options will be populated here -->
+        </div>
+        <div style="margin-bottom:16px;">
+          <label class="hint">Name for new formation</label>
+          <input id="templateFormationName" placeholder="Enter formation name" />
+        </div>
+        <div class="row">
+          <button class="btn ghost" id="btnCancelTemplate">Cancel</button>
+          <button class="btn primary" id="btnCreateFromTemplate">Create Formation</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Lineup -->
+  <section class="panel hidden" id="viewLineup">
+    <div class="section-title">2) Pick Starting Lineup (1 GK, 3 DF, 2 MF, 3 ST)</div>
+    <div class="grid cols-3">
+      <div>
+        <div class="section-title">Required Slots</div>
+        <ul id="slotList" style="list-style:none;padding:0;margin:0"></ul>
+      </div>
+      <div>
+        <div class="section-title">Roster</div>
+        <table id="rosterTable">
+          <thead><tr><th>Name</th><th>#</th><th>Preferred</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div>
+        <div class="section-title">Assignments</div>
+        <table id="assignTable">
+          <thead><tr><th>Slot</th><th>Player</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="sticky-footer row" style="justify-content:space-between">
+      <span class="hint">Tap a slot → tap a player to assign. Duplicate prevention included.</span>
+      <div class="row">
+        <button class="btn ghost" id="btnClearAssign">Clear All</button>
+        <button class="btn primary" id="btnStartGame">Start Game</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Game -->
+  <section class="panel hidden" id="viewGame">
+    <div class="row" style="justify-content:space-between; align-items:center;">
+      <div class="row" style="gap:12px">
+        <div class="pill" id="clockLabel">00:00 / 60:00</div>
+        <div class="pill" id="statusLabel">PAUSED</div>
+        <div class="pill" id="periodPill">1st Half</div>
+        <div class="pill" id="metaPill">Stoppage 00:00 • Adjust +00:00</div>
+        <div class="pill" id="halfLabel" style="display:none">BREAK</div>
+        <div class="pill" id="schedLabel" style="display:none">Starts in 00:00</div>
+      </div>
+      <div class="row">
+        <button class="btn" id="gStart">Start/Resume</button>
+        <button class="btn" id="gPause">Pause</button>
+        <button class="btn" id="gHalf">Halftime (10.5m)</button>
+        <button class="btn" id="gSave">Save</button>
+      </div>
+      <div class="row" style="margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">
+        <span class="section-title" style="margin-bottom:0;">Quick Actions:</span>
+        <button class="btn ghost" id="gStoppage30" onclick="apiAddStoppageTime(30)">+30s Stop</button>
+        <button class="btn ghost" id="gStoppage60" onclick="apiAddStoppageTime(60)">+1m Stop</button>
+        <button class="btn ghost" id="gAdjustMin" onclick="apiAddTimeAdjustment(-60)">-1m Adj</button>
+        <button class="btn ghost" id="gAdjustPlus" onclick="apiAddTimeAdjustment(60)">+1m Adj</button>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:12px">
+      <div class="section-title">Period Summary</div>
+      <table id="periodTable">
+        <thead>
+          <tr><th>Period</th><th>Reg</th><th>Elapsed</th><th>Adj</th><th>Stop</th><th>Remain</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:12px">
+      <div class="panel">
+        <div class="section-title">On Field</div>
+        <table id="onFieldTable">
+          <thead>
+            <tr><th>Pos</th><th>Name</th><th>#</th><th>Stint</th><th>Total</th><th>Pref</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <div class="section-title">Roster / Choose Replacement</div>
+        <table id="rosterGameTable">
+          <thead>
+            <tr><th>Name</th><th>#</th><th>Status</th><th>Pos</th><th>Stint</th><th>Total</th><th>Pref</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="divider"></div>
+        
+        <!-- Selection Status Display -->
+        <div id="selectionStatus" class="selection-status" style="display:none;">
+          <div class="row" style="justify-content:space-between;">
+            <div>
+              <span class="status-label">Subbing Out:</span>
+              <span class="player-name out-player" id="outPlayerDisplay">None</span>
+            </div>
+            <div style="font-size:20px;">➜</div>
+            <div>
+              <span class="status-label">Subbing In:</span>
+              <span class="player-name in-player" id="inPlayerDisplay">None</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="row" style="justify-content:space-between;margin-top:8px;">
+          <div class="hint">Click a player in "On Field" to select OUT, then click a player in "Roster" to select IN.</div>
+          <div class="row">
+            <button class="btn" id="btnQueue">Queue Selected</button>
+            <button class="btn" id="btnClearQueue">Clear Queue</button>
+            <button class="btn primary" id="btnCommit">Commit Subs</button>
+          </div>
+        </div>
+        <div id="queueList" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Reports -->
+  <section class="panel hidden" id="viewReports">
+    <div class="section-title">4) Playing Time Analytics</div>
+    <div class="grid cols-2">
+      <div class="panel" style="min-height:120px">
+        <div class="section-title">Summary</div>
+        <p class="accent" id="reportSummary">Add players to view analytics.</p>
+        <p class="hint" id="reportDetail"></p>
+        <p class="hint" id="reportDistribution"></p>
+      </div>
+      <div class="panel" style="min-height:120px">
+        <div class="section-title">Targets</div>
+        <p class="hint" id="reportTargets"></p>
+        <p class="hint" id="reportElapsed"></p>
+        <div style="margin-top: 10px;">
+          <button class="btn ghost" onclick="exportReportCSV()" title="Export detailed report as CSV">
+            📊 Export CSV
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button class="btn" id="btnReportExport">Export CSV</button>
+    </div>
+    <div class="divider"></div>
+    <table id="reportTable">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>#</th>
+          <th>Preferred</th>
+          <th>Status</th>
+          <th>Played</th>
+          <th>Target</th>
+          <th>Delta</th>
+          <th>Share</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="hint" id="reportNote">Delta compares playing time against an equal share of regulation, stoppage, and adjustments.</p>
+  </section>
+
+</div>

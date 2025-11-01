@@ -6,10 +6,11 @@ and provides JSON API endpoints for the enhanced timer and analytics features.
 """
 import os
 import json
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import date
 
-from flask import Flask, send_from_directory, jsonify, request
+from flask import Flask, send_from_directory, jsonify, request, render_template
 
 from ..models import GameState, Player, ContactInfo, MedicalInfo, PlayerStats, GameAttendance
 from ..models.formation import Formation, FormationType, FieldPosition, Position
@@ -78,24 +79,60 @@ def create_app(static_folder: str = ".") -> Flask:
     Returns:
         Configured Flask application instance
     """
-    app = Flask(__name__, static_folder=static_folder, static_url_path="")
+    static_path = Path(static_folder).resolve()
+    template_path = static_path / "templates"
+    manifest_path = static_path / "web_dist" / ".vite" / "manifest.json"
+
+    app = Flask(
+        __name__,
+        static_folder=str(static_path),
+        static_url_path="",
+        template_folder=str(template_path),
+    )
+
+    def _load_manifest() -> Optional[Dict[str, Any]]:
+        """Load the Vite manifest describing compiled assets."""
+        if not manifest_path.exists():
+            return None
+        try:
+            with manifest_path.open("r", encoding="utf-8") as manifest_file:
+                return json.load(manifest_file)
+        except json.JSONDecodeError as exc:
+            app.logger.warning("Invalid Vite manifest: %s", exc)
+            return None
 
     @app.route("/")
     def index():
         """Serve the main HTML interface."""
-        import time
-        response = send_from_directory(static_folder, "index.html")
-        # Add cache-busting headers for development
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
-        response.headers['ETag'] = str(int(time.time()))
-        return response
+        dev_server_url = os.environ.get("WEB_UI_DEV_SERVER")
+        asset_entry: Optional[Dict[str, Any]] = None
+
+        if not dev_server_url:
+            manifest = _load_manifest()
+            if manifest is None:
+                return (
+                    "Web assets missing. Run `npm install` and `npm run build` inside the `frontend/` directory.",
+                    503,
+                    {"Content-Type": "text/plain; charset=utf-8"},
+                )
+            asset_entry = manifest.get("main.js") or manifest.get("src/main.js")
+            if asset_entry is None:
+                return (
+                    "Vite manifest missing `src/main.js` entry. Rebuild the frontend assets.",
+                    500,
+                    {"Content-Type": "text/plain; charset=utf-8"},
+                )
+
+        return render_template(
+            "index.html",
+            dev_server_url=dev_server_url,
+            asset_entry=asset_entry,
+        )
 
     @app.route("/test")
     def test_buttons():
         """Serve the test buttons page."""
-        response = send_from_directory(static_folder, "test_buttons.html")
+        response = send_from_directory(str(static_path), "test_buttons.html")
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'

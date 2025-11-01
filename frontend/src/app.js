@@ -1,0 +1,2979 @@
+/** -------------------------
+ *  API Communication Layer
+ *  ------------------------- */
+const API_BASE = '/api';
+
+// API communication functions for enhanced features
+async function apiCall(endpoint, method = 'GET', data = null) {
+  try {
+    const options = {
+      method,
+      headers: {},
+    };
+    
+    // Only set JSON headers and body if we have data to send
+    if (data) {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(data);
+    }
+    
+    const response = await fetch(`${API_BASE}${endpoint}`, options);
+    const result = await response.json();
+    
+    if (!result.success) {
+      console.error('API Error:', result.error);
+      showNotification(result.error || 'API request failed', 'error');
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Network error:', error);
+    showNotification('Network error', 'error');
+    return {success: false, error: error.message};
+  }
+}
+
+// Enhanced timer control functions using API
+async function apiStartGame() {
+  const result = await apiCall('/timer/start', 'POST');
+  if (result.success) {
+    showNotification('Game started', 'success');
+    refreshFromAPI();
+  } else {
+    // Handle specific validation errors
+    if (result.validation_errors && result.validation_errors.length > 0) {
+      const errorMsg = result.validation_errors.join(', ');
+      console.warn('Validation errors:', errorMsg);
+      showNotification(`Cannot start game: ${errorMsg}`, 'error');
+      
+      // If this is a roster issue, clear any scheduled start to prevent loops
+      if (errorMsg.includes('roster') || errorMsg.includes('players')) {
+        console.warn('Clearing scheduled start due to roster validation failure');
+        state.scheduledStartTs = null;
+        saveLocal();
+      }
+    } else {
+      showNotification(result.error || 'Failed to start game', 'error');
+    }
+    
+    // Ensure API errors are properly propagated as promise rejections
+    const error = new Error(result.error || 'Failed to start game');
+    throw error;
+  }
+}
+
+async function apiPauseGame() {
+  const result = await apiCall('/timer/pause', 'POST');
+  if (result.success) {
+    showNotification('Game paused', 'success');
+    refreshFromAPI();
+  }
+}
+
+async function apiStartHalftime() {
+  const result = await apiCall('/timer/halftime', 'POST');
+  if (result.success) {
+    showNotification('Halftime started', 'success');
+    refreshFromAPI();
+  }
+}
+
+async function apiAddStoppageTime(seconds) {
+  const result = await apiCall('/timer/stoppage', 'POST', {seconds});
+  if (result.success) {
+    showNotification(`Added ${seconds}s stoppage time`, 'success');
+    refreshFromAPI();
+  }
+}
+
+async function apiAddTimeAdjustment(seconds, periodIndex = null, applyToAll = false) {
+  const result = await apiCall('/timer/adjustment', 'POST', {
+    seconds, 
+    period_index: periodIndex, 
+    apply_to_all: applyToAll
+  });
+  if (result.success) {
+    showNotification(`Added ${seconds}s time adjustment`, 'success');
+    refreshFromAPI();
+  }
+}
+
+async function apiConfigureTimer(minutes, periods) {
+  const result = await apiCall('/timer/configure', 'POST', {minutes, periods});
+  if (result.success) {
+    showNotification('Timer configured', 'success');
+    refreshFromAPI();
+  }
+}
+
+async function apiMakeSubstitution(outName, inName) {
+  const result = await apiCall('/substitution', 'POST', {out_name: outName, in_name: inName});
+  if (result.success) {
+    showNotification(`Substituted ${outName} for ${inName}`, 'success');
+    refreshFromAPI();
+  }
+}
+
+async function exportReportCSV() {
+  try {
+    const response = await fetch('/api/analytics/export', {
+      method: 'GET',
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to export report');
+    }
+    
+    // Get the filename from the response headers
+    const contentDisposition = response.headers.get('content-disposition');
+    let filename = 'game_report.csv';
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename="(.+)"/);
+      if (match) filename = match[1];
+    }
+    
+    // Download the file
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showNotification('Report exported successfully', 'success');
+  } catch (error) {
+    console.error('Export failed:', error);
+    showNotification('Failed to export report', 'error');
+  }
+}
+
+async function refreshFromAPI() {
+  const result = await apiCall('/state');
+  if (result.success) {
+    // Update local state with server data
+    updateLocalStateFromAPI(result);
+    renderGame();
+  }
+}
+
+function updateLocalStateFromAPI(apiData) {
+  // Update local state with data from API
+  const gameState = apiData.game_state;
+  const players = apiData.players;
+  
+  // Update timer state
+  state.paused = gameState.paused;
+  state.gameStartTs = gameState.game_started ? Date.now() / 1000 - gameState.elapsed_seconds : null;
+  state.periodCount = gameState.period_count;
+  
+  // Update players
+  state.players = players.map(p => ({
+    name: p.name,
+    number: p.number,
+    preferred: p.preferred_positions,
+    totalSec: p.total_seconds,
+    onField: p.on_field,
+    position: p.position,
+    stintStart: p.on_field && !gameState.paused ? Date.now() / 1000 : null
+  }));
+}
+
+function showNotification(message, type = 'info') {
+  // Simple notification system
+  const notification = document.createElement('div');
+  notification.className = `notification ${type}`;
+  notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed; top: 20px; right: 20px; z-index: 1000;
+    padding: 12px 20px; border-radius: 8px; color: white;
+    background: ${type === 'success' ? '#24c88b' : type === 'error' ? '#ff6b6b' : '#4ea1ff'};
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    transition: all 0.3s ease;
+  `;
+  
+  document.body.appendChild(notification);
+  setTimeout(() => {
+    notification.style.opacity = '0';
+    notification.style.transform = 'translateY(-20px)';
+    setTimeout(() => document.body.removeChild(notification), 300);
+  }, 3000);
+}
+
+/** -------------------------
+ *  Data Model & Utilities
+ *  ------------------------- */
+const GAME_LENGTH_MIN = 60;
+const HALFTIME_MIN = 10.5;
+const PERIOD_LABELS = {1: "Full Time", 2: "Half", 3: "Third", 4: "Quarter"};
+const POS_FULL = {GK:"Goalkeeper", DF:"Defender", MF:"Midfielder", ST:"Striker"};
+const FAIRNESS_THRESHOLD = 120; // seconds
+
+// Function to get required slots based on field size or formation
+function getRequiredSlots() {
+  // If there's a current formation selected, use its positions
+  if (currentFormation && currentFormation.positions && currentFormation.positions.length > 0) {
+    return currentFormation.positions.map(pos => {
+      const code = pos.position_code;
+      // Map position codes to simplified versions
+      if (code.includes('GK') || code === 'GOALKEEPER') return 'GK';
+      if (code.includes('LB') || code.includes('RB') || code.includes('CB') || code.includes('DF') || code === 'DEFENDER') return 'DF';
+      if (code.includes('LM') || code.includes('RM') || code.includes('CM') || code.includes('CAM') || code.includes('CDM') || code.includes('MF') || code === 'MIDFIELDER') return 'MF';
+      if (code.includes('LW') || code.includes('RW') || code.includes('ST') || code.includes('CF') || code.includes('FOR') || code === 'FORWARD') return 'ST';
+      return 'MF'; // default to midfielder
+    });
+  }
+  
+  // Otherwise, generate based on field size
+  const fieldSize = state.fieldSize || 11;
+  const slots = ['GK']; // Always start with goalkeeper
+  const outfield = fieldSize - 1;
+  
+  // Distribute remaining positions based on field size
+  if (fieldSize === 7) {
+    // 2-3-1: 2 DF, 3 MF, 1 ST
+    slots.push('DF', 'DF', 'MF', 'MF', 'MF', 'ST');
+  } else if (fieldSize === 9) {
+    // 3-2-3: 3 DF, 2 MF, 3 ST
+    slots.push('DF', 'DF', 'DF', 'MF', 'MF', 'ST', 'ST', 'ST');
+  } else if (fieldSize === 10) {
+    // 3-3-3: 3 DF, 3 MF, 3 ST
+    slots.push('DF', 'DF', 'DF', 'MF', 'MF', 'MF', 'ST', 'ST', 'ST');
+  } else {
+    // 11v11 default: 3-3-4 (3 DF, 3 MF, 4 ST for flexibility)
+    slots.push('DF', 'DF', 'DF', 'MF', 'MF', 'MF', 'ST', 'ST', 'ST', 'ST');
+  }
+  
+  return slots;
+}
+
+let state = {
+  players: [], // {name, number, preferred, totalSec, onField, position, stintStart}
+  fieldSize: 11, // Players per team: 7, 9, 10, or 11
+  gameStartTs: null,
+  paused: true,
+  breakActive: false,
+  halftimeEndTs: null,
+  scheduledStartTs: null,
+  elapsedAdjustment: 0, // legacy aggregate
+  gameLengthSec: GAME_LENGTH_MIN * 60,
+  periodCount: 2,
+  periodElapsed: [],
+  periodAdjust: [],
+  periodStoppage: [],
+  currentPeriodIndex: 0,
+  periodStartTs: null
+};
+
+function ordinal(n) {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  const rem10 = n % 10;
+  const suffix = rem10 === 1 ? "st" : rem10 === 2 ? "nd" : rem10 === 3 ? "rd" : "th";
+  return `${n}${suffix}`;
+}
+
+function describePeriodLabel(number, total) {
+  const base = PERIOD_LABELS[total] || "Period";
+  if (total <= 1) return base;
+  return `${ordinal(number)} ${base}`;
+}
+
+function ensurePeriodArrays() {
+  const count = Math.max(1, state.periodCount | 0);
+  state.periodCount = count;
+  const expand = (arr) => {
+    if (!Array.isArray(arr)) arr = [];
+    if (arr.length < count) {
+      return arr.concat(Array(count - arr.length).fill(0));
+    }
+    if (arr.length > count) {
+      return arr.slice(0, count);
+    }
+    return arr;
+  };
+  state.periodElapsed = expand(state.periodElapsed);
+  state.periodAdjust = expand(state.periodAdjust);
+  state.periodStoppage = expand(state.periodStoppage);
+  if (state.currentPeriodIndex >= count) {
+    state.currentPeriodIndex = count - 1;
+  }
+}
+
+function normalizeState() {
+  state.gameLengthSec = Number(state.gameLengthSec || GAME_LENGTH_MIN * 60);
+  state.periodCount = Number(state.periodCount || 2);
+  state.elapsedAdjustment = Number(state.elapsedAdjustment || 0);
+  state.fieldSize = Number(state.fieldSize || 11); // Default to 11v11 for backward compatibility
+  if (typeof state.currentPeriodIndex !== "number") state.currentPeriodIndex = 0;
+  if (typeof state.periodStartTs !== "number") state.periodStartTs = null;
+  state.breakActive = Boolean(state.breakActive);
+  ensurePeriodArrays();
+  
+  // Sync UI field size selector with state (only if ui is initialized)
+  if (typeof ui !== 'undefined' && ui.fieldSizeSelect) {
+    ui.fieldSizeSelect.value = state.fieldSize;
+  }
+}
+
+function totalAdjustmentSeconds() {
+  ensurePeriodArrays();
+  return state.periodAdjust.slice(0, state.periodCount).reduce((sum, v) => sum + (v | 0), 0);
+}
+
+function recalcAggregateAdjustment() {
+  state.elapsedAdjustment = totalAdjustmentSeconds();
+}
+
+function totalStoppageSeconds() {
+  ensurePeriodArrays();
+  return state.periodStoppage.slice(0, state.periodCount).reduce((sum, v) => sum + (v | 0), 0);
+}
+
+function targetSecondsTotal() {
+  return Math.max(0, state.gameLengthSec + totalStoppageSeconds() + totalAdjustmentSeconds());
+}
+
+function targetSecondsPerPlayer() {
+  const rosterSize = Math.max(1, state.players.length);
+  return targetSecondsTotal() / rosterSize;
+}
+
+function baseElapsedSeconds(includeRunning = true) {
+  ensurePeriodArrays();
+  let total = state.periodElapsed.slice(0, state.periodCount).reduce((sum, v) => sum + (v | 0), 0);
+  if (includeRunning && state.periodStartTs && !state.paused && !state.breakActive) {
+    total += Math.max(0, nowSec() - state.periodStartTs);
+  }
+  if (total === 0 && state.gameStartTs) {
+    total = Math.max(0, nowSec() - state.gameStartTs);
+  }
+  return total;
+}
+
+function gameElapsedSeconds() {
+  return baseElapsedSeconds() + totalAdjustmentSeconds() + totalStoppageSeconds();
+}
+
+function periodTargetSeconds(index) {
+  ensurePeriodArrays();
+  const count = state.periodCount;
+  const base = Math.floor(state.gameLengthSec / count);
+  const remainder = state.gameLengthSec % count;
+  const reg = base + (index < remainder ? 1 : 0);
+  return reg + (state.periodAdjust[index] | 0) + (state.periodStoppage[index] | 0);
+}
+
+function periodRegulationSeconds(index) {
+  const count = state.periodCount;
+  const base = Math.floor(state.gameLengthSec / count);
+  const remainder = state.gameLengthSec % count;
+  return base + (index < remainder ? 1 : 0);
+}
+
+function periodRemainingSeconds(index) {
+  const target = periodTargetSeconds(index);
+  const elapsed = state.periodElapsed[index] + (index === state.currentPeriodIndex && state.periodStartTs && !state.paused && !state.breakActive ? Math.max(0, nowSec() - state.periodStartTs) : 0);
+  return Math.max(0, target - elapsed);
+}
+
+console.log('[DEBUG] Starting UI initialization...');
+
+let ui = {
+  // nav
+  btnSetup: document.getElementById("btnSetup"),
+  btnLineup: document.getElementById("btnLineup"),
+  btnGame: document.getElementById("btnGame"),
+  btnReports: document.getElementById("btnReports"),
+  btnPlayers: document.getElementById("btnPlayers"),
+  btnFormations: document.getElementById("btnFormations"),
+  viewSetup: document.getElementById("viewSetup"),
+  viewLineup: document.getElementById("viewLineup"),
+  viewGame: document.getElementById("viewGame"),
+  viewReports: document.getElementById("viewReports"),
+  viewPlayers: document.getElementById("viewPlayers"),
+  viewFormations: document.getElementById("viewFormations"),
+
+  // setup
+  rosterInput: document.getElementById("rosterInput"),
+  fieldSizeSelect: document.getElementById("fieldSizeSelect"),
+  btnExample: document.getElementById("btnExample"),
+  btnLoadRoster: document.getElementById("btnLoadRoster"),
+  btnSave: document.getElementById("btnSave"),
+  btnLoad: document.getElementById("btnLoad"),
+  btnClear: document.getElementById("btnClear"),
+  fileLoad: document.getElementById("fileLoad"),
+  scheduledHHMM: document.getElementById("scheduledHHMM"),
+  btnSetSchedule: document.getElementById("btnSetSchedule"),
+  scheduledLabel: document.getElementById("scheduledLabel"),
+  btnStart: document.getElementById("btnStart"),
+  btnPause: document.getElementById("btnPause"),
+  btnHalftime: document.getElementById("btnHalftime"),
+  btnEndHalftime: document.getElementById("btnEndHalftime"),
+  formatMinutes: document.getElementById("formatMinutes"),
+  formatPeriods: document.getElementById("formatPeriods"),
+  btnApplyFormat: document.getElementById("btnApplyFormat"),
+  adjustKind: document.getElementById("adjustKind"),
+  adjustPeriod: document.getElementById("adjustPeriod"),
+  adjustSeconds: document.getElementById("adjustSeconds"),
+  adjustAll: document.getElementById("adjustAll"),
+  btnApplyManual: document.getElementById("btnApplyManual"),
+
+  // lineup
+  slotList: document.getElementById("slotList"),
+  rosterTable: document.querySelector("#rosterTable tbody"),
+  assignTable: document.querySelector("#assignTable tbody"),
+  btnClearAssign: document.getElementById("btnClearAssign"),
+  btnStartGame: document.getElementById("btnStartGame"),
+
+  // game
+  clockLabel: document.getElementById("clockLabel"),
+  statusLabel: document.getElementById("statusLabel"),
+  periodPill: document.getElementById("periodPill"),
+  metaPill: document.getElementById("metaPill"),
+  halfLabel: document.getElementById("halfLabel"),
+  schedLabel: document.getElementById("schedLabel"),
+  gStart: document.getElementById("gStart"),
+  gPause: document.getElementById("gPause"),
+  gHalf: document.getElementById("gHalf"),
+  gSave: document.getElementById("gSave"),
+  periodTable: document.querySelector("#periodTable tbody"),
+  onFieldTable: document.querySelector("#onFieldTable tbody"),
+  rosterGameTable: document.querySelector("#rosterGameTable tbody"),
+  btnQueue: document.getElementById("btnQueue"),
+  btnClearQueue: document.getElementById("btnClearQueue"),
+  btnCommit: document.getElementById("btnCommit"),
+  queueList: document.getElementById("queueList"),
+
+  // reports
+  btnReportExport: document.getElementById("btnReportExport"),
+  reportSummary: document.getElementById("reportSummary"),
+  reportDetail: document.getElementById("reportDetail"),
+  reportDistribution: document.getElementById("reportDistribution"),
+  reportTargets: document.getElementById("reportTargets"),
+  reportElapsed: document.getElementById("reportElapsed"),
+  reportTable: document.querySelector("#reportTable tbody"),
+  reportNote: document.getElementById("reportNote"),
+
+  // players
+  playersTable: document.querySelector("#playersTable tbody"),
+  playerDetails: document.getElementById("playerDetails"),
+  btnAddPlayer: document.getElementById("btnAddPlayer"),
+  btnEditPlayer: document.getElementById("btnEditPlayer"),
+  btnDeletePlayer: document.getElementById("btnDeletePlayer"),
+  btnImportPlayers: document.getElementById("btnImportPlayers"),
+  btnExportPlayers: document.getElementById("btnExportPlayers"),
+  btnPlayerStats: document.getElementById("btnPlayerStats"),
+  btnAttendance: document.getElementById("btnAttendance"),
+
+  // formations
+  formationSelect: document.getElementById("formationSelect"),
+  formationName: document.getElementById("formationName"),
+  formationType: document.getElementById("formationType"),
+  formationDescription: document.getElementById("formationDescription"),
+  btnNewFormation: document.getElementById("btnNewFormation"),
+  btnFromTemplate: document.getElementById("btnFromTemplate"),
+  btnDeleteFormation: document.getElementById("btnDeleteFormation"),
+  btnSaveFormation: document.getElementById("btnSaveFormation"),
+  btnAutoAssign: document.getElementById("btnAutoAssign"),
+  btnClearAssignments: document.getElementById("btnClearAssignments"),
+  btnSuggestFormation: document.getElementById("btnSuggestFormation"),
+  fieldContainer: document.getElementById("fieldContainer"),
+  fieldMarkings: document.getElementById("fieldMarkings"),
+  formationPositions: document.getElementById("formationPositions"),
+  formationInfo: document.getElementById("formationInfo"),
+  positionAssignments: document.getElementById("positionAssignments"),
+  templateModal: document.getElementById("templateModal"),
+  templateList: document.getElementById("templateList"),
+  templateFormationName: document.getElementById("templateFormationName"),
+  btnCancelTemplate: document.getElementById("btnCancelTemplate"),
+  btnCreateFromTemplate: document.getElementById("btnCreateFromTemplate"),
+};
+
+console.log('[DEBUG] UI object created');
+
+// Now that ui is defined, normalize state and sync UI
+normalizeState();
+console.log('[DEBUG] State normalized');
+
+let selectedSlotIndex = null;  // for lineup
+let selectedOutName = null;    // in-game OUT selection
+let selectedInName = null;     // in-game IN selection
+let subQueue = [];             // [{out,in}]
+let tickHandle = null;
+let latestReportSnapshot = null;
+
+function nowSec() { return Math.floor(Date.now()/1000); }
+function fmtMMSS(sec) { sec = Math.max(0, sec|0); const m = Math.floor(sec/60), s = sec%60; return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`; }
+function fmtSignedMMSS(sec) { const sign = sec >= 0 ? "+" : "-"; return sign + fmtMMSS(Math.abs(sec)); }
+function saveLocal() {
+  recalcAggregateAdjustment();
+  localStorage.setItem("sideline_state", JSON.stringify(state));
+}
+function loadLocal() {
+  const s = localStorage.getItem("sideline_state");
+  if (s) {
+    try {
+      state = JSON.parse(s);
+    } catch (err) {
+      console.warn("Failed to parse saved state", err);
+    }
+  }
+  normalizeState();
+  recalcAggregateAdjustment();
+}
+function resetAll() {
+  state = {
+    players: [],
+    fieldSize: 11,
+    gameStartTs: null,
+    paused: true,
+    breakActive: false,
+    halftimeEndTs: null,
+    scheduledStartTs: null,
+    elapsedAdjustment: 0,
+    gameLengthSec: GAME_LENGTH_MIN * 60,
+    periodCount: 2,
+    periodElapsed: [],
+    periodAdjust: [],
+    periodStoppage: [],
+    currentPeriodIndex: 0,
+    periodStartTs: null
+  };
+  normalizeState();
+  subQueue = []; selectedOutName = null; selectedInName = null; selectedSlotIndex = null;
+  saveLocal(); renderAll();
+}
+
+function fairnessClass(totalSec, targetSec = targetSecondsPerPlayer()) {
+  const delta = totalSec - targetSec;
+  if (delta <= -FAIRNESS_THRESHOLD) return "under";
+  if (delta >= FAIRNESS_THRESHOLD) return "over";
+  return "ok";
+}
+
+function currentStint(p) {
+  if (p.onField && p.stintStart) return nowSec() - p.stintStart;
+  return 0;
+}
+
+function totalLive(p) {
+  return (p.totalSec|0) + currentStint(p);
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+function csvEscape(value) {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function reportSnapshotToCsv(snapshot) {
+  const lines = [];
+  const iso = new Date(snapshot.generatedTs * 1000).toISOString();
+  lines.push(["Sideline Timekeeper Report"]);
+  lines.push(["Generated", iso]);
+  lines.push(["Roster Size", snapshot.rosterSize]);
+  lines.push(["Elapsed Seconds", Math.round(snapshot.elapsed)]);
+  lines.push(["Regulation Seconds", Math.round(snapshot.regulationSeconds)]);
+  lines.push(["Stoppage Seconds", Math.round(snapshot.stoppage)]);
+  lines.push(["Adjustment Seconds", Math.round(snapshot.adjustments)]);
+  lines.push(["Target Seconds Total", Math.round(snapshot.totalTarget)]);
+  lines.push(["Target Seconds Per Player", Math.round(snapshot.perPlayerRounded)]);
+  lines.push(["Average Seconds", Math.round(snapshot.average * 100) / 100]);
+  lines.push(["Median Seconds", Math.round(snapshot.median * 100) / 100]);
+  lines.push(["Minimum Seconds", Math.round(snapshot.min)]);
+  lines.push(["Maximum Seconds", Math.round(snapshot.max)]);
+  const fairnessCounts = snapshot.fairnessCounts || { under: 0, ok: 0, over: 0 };
+  lines.push(["Players Under Target", fairnessCounts.under || 0]);
+  lines.push(["Players On Target", fairnessCounts.ok || 0]);
+  lines.push(["Players Over Target", fairnessCounts.over || 0]);
+  lines.push([]);
+  lines.push([
+    "Name",
+    "Number",
+    "Preferred Positions",
+    "On Field",
+    "Position",
+    "Total Seconds",
+    "Active Stint Seconds",
+    "Cumulative Seconds",
+    "Target Seconds",
+    "Delta Seconds",
+    "Bench Seconds",
+    "Target Share (%)",
+    "Fairness",
+  ]);
+
+  snapshot.rows.forEach((row) => {
+    lines.push([
+      row.name,
+      row.number,
+      row.preferredList.join(", "),
+      row.onField ? "yes" : "no",
+      row.position,
+      row.totalSeconds,
+      row.activeSeconds,
+      row.cumulativeSeconds,
+      row.targetSeconds,
+      row.deltaSeconds,
+      row.benchSeconds,
+      Math.round(row.targetSharePercent * 100) / 100,
+      row.fairness,
+    ]);
+  });
+
+  return lines.map((line) => line.map(csvEscape).join(",")).join("\n") + "\n";
+}
+
+function buildReportSnapshot() {
+  ensurePeriodArrays();
+  const roster = state.players.slice();
+  if (!roster.length) {
+    latestReportSnapshot = null;
+    return null;
+  }
+
+  const generatedTs = nowSec();
+  const elapsed = gameElapsedSeconds();
+  const totalTarget = targetSecondsTotal();
+  const perPlayerTarget = targetSecondsPerPlayer();
+  const perPlayerRounded = Math.round(perPlayerTarget);
+  const stoppage = totalStoppageSeconds();
+  const adjustments = totalAdjustmentSeconds();
+  const regulation = state.gameLengthSec;
+  const totals = roster.map(totalLive);
+  const average = totals.length
+    ? totals.reduce((sum, value) => sum + value, 0) / totals.length
+    : 0;
+  const med = median(totals);
+  const minVal = totals.length ? Math.min(...totals) : 0;
+  const maxVal = totals.length ? Math.max(...totals) : 0;
+  const fairnessOrder = { under: 0, ok: 1, over: 2 };
+
+  const rows = roster.map((player) => {
+    const preferredList = (player.preferred || "")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length);
+    const total = totalLive(player);
+    const delta = Math.round(total - perPlayerTarget);
+    const fairness = fairnessClass(total, perPlayerTarget);
+    const share = perPlayerTarget > 0 ? (total / perPlayerTarget) * 100 : 0;
+    const status = player.onField
+      ? `On Field${player.position ? ` (${player.position})` : ""}`
+      : "Bench";
+    const benchSeconds = Math.max(0, elapsed - total);
+    const activeSeconds = currentStint(player);
+    return {
+      name: player.name,
+      number: player.number || "",
+      preferredList,
+      preferredDisplay: preferredList.join(", "),
+      onField: !!player.onField,
+      position: player.position || "",
+      totalSeconds: Math.max(0, player.totalSec | 0),
+      activeSeconds,
+      cumulativeSeconds: total,
+      targetSeconds: perPlayerRounded,
+      deltaSeconds: delta,
+      benchSeconds,
+      targetSharePercent: share,
+      fairness,
+      status,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (fairnessOrder[a.fairness] !== fairnessOrder[b.fairness]) {
+      return fairnessOrder[a.fairness] - fairnessOrder[b.fairness];
+    }
+    if (a.deltaSeconds !== b.deltaSeconds) {
+      return a.deltaSeconds - b.deltaSeconds;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  const fairnessCounts = { under: 0, ok: 0, over: 0 };
+  rows.forEach((row) => {
+    const key = row.fairness;
+    fairnessCounts[key] = (fairnessCounts[key] || 0) + 1;
+  });
+
+  latestReportSnapshot = {
+    generatedTs,
+    rosterSize: roster.length,
+    elapsed,
+    totalTarget,
+    perPlayerTarget,
+    perPlayerRounded,
+    stoppage,
+    adjustments,
+    regulationSeconds: regulation,
+    average,
+    median: med,
+    min: minVal,
+    max: maxVal,
+    rows,
+    fairnessCounts,
+  };
+  return latestReportSnapshot;
+}
+
+function downloadReportCsv() {
+  const snapshot = buildReportSnapshot();
+  if (!snapshot) {
+    alert("Add players before exporting analytics.");
+    return;
+  }
+
+  const csv = reportSnapshotToCsv(snapshot);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date(snapshot.generatedTs * 1000)
+    .toISOString()
+    .replace(/[:.]/g, "-");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `sideline_report_${stamp}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/** -------------------------
+ *  Navigation & Views
+ *  ------------------------- */
+function show(view) {
+  const views = {
+    setup: ui.viewSetup,
+    players: ui.viewPlayers,
+    formations: ui.viewFormations,
+    lineup: ui.viewLineup,
+    game: ui.viewGame,
+    reports: ui.viewReports,
+  };
+  Object.entries(views).forEach(([key, el]) => {
+    if (!el) return;
+    el.classList.toggle("hidden", view !== key);
+  });
+  const buttons = {
+    setup: ui.btnSetup,
+    players: ui.btnPlayers,
+    formations: ui.btnFormations,
+    lineup: ui.btnLineup,
+    game: ui.btnGame,
+    reports: ui.btnReports,
+  };
+  Object.entries(buttons).forEach(([key, btn]) => {
+    if (!btn) return;
+    btn.classList.toggle("primary", view === key);
+  });
+}
+
+console.log('[DEBUG] UI object created, btnSetup=', ui.btnSetup);
+console.log('[DEBUG] Attaching event handlers...');
+
+ui.btnSetup.onclick = () => { console.log('[DEBUG] Setup clicked'); show("setup"); };
+ui.btnPlayers.onclick = () => { console.log('[DEBUG] Players clicked'); show("players"); renderPlayers(); };
+ui.btnFormations.onclick = () => { console.log('[DEBUG] Formations clicked'); show("formations"); renderFormations(); };
+ui.btnLineup.onclick = () => { console.log('[DEBUG] Lineup clicked'); show("lineup"); renderLineup(); };
+ui.btnGame.onclick = () => { console.log('[DEBUG] Game clicked'); show("game"); renderGame(); };
+ui.btnReports.onclick = () => { console.log('[DEBUG] Reports clicked'); show("reports"); renderReports(); };
+
+console.log('[DEBUG] Event handlers attached successfully');
+if (ui.btnReportExport) ui.btnReportExport.onclick = downloadReportCsv;
+
+// Player management button handlers
+if (ui.btnAddPlayer) ui.btnAddPlayer.onclick = addPlayer;
+if (ui.btnEditPlayer) ui.btnEditPlayer.onclick = editPlayer;
+if (ui.btnDeletePlayer) ui.btnDeletePlayer.onclick = deletePlayer;
+if (ui.btnImportPlayers) ui.btnImportPlayers.onclick = importPlayers;
+if (ui.btnExportPlayers) ui.btnExportPlayers.onclick = exportPlayers;
+if (ui.btnPlayerStats) ui.btnPlayerStats.onclick = showPlayerStats;
+if (ui.btnAttendance) ui.btnAttendance.onclick = showAttendance;
+
+// Initially disable buttons that require selection
+if (ui.btnEditPlayer) ui.btnEditPlayer.disabled = true;
+if (ui.btnDeletePlayer) ui.btnDeletePlayer.disabled = true;
+if (ui.btnPlayerStats) ui.btnPlayerStats.disabled = true;
+if (ui.btnAttendance) ui.btnAttendance.disabled = true;
+
+// Formation management button handlers
+if (ui.btnNewFormation) ui.btnNewFormation.onclick = createNewFormation;
+if (ui.btnFromTemplate) ui.btnFromTemplate.onclick = createFromTemplate;
+if (ui.btnDeleteFormation) ui.btnDeleteFormation.onclick = deleteFormation;
+if (ui.btnSaveFormation) ui.btnSaveFormation.onclick = saveFormation;
+if (ui.btnAutoAssign) ui.btnAutoAssign.onclick = autoAssignPlayers;
+if (ui.btnClearAssignments) ui.btnClearAssignments.onclick = clearAssignments;
+if (ui.btnSuggestFormation) ui.btnSuggestFormation.onclick = suggestFormation;
+if (ui.formationSelect) ui.formationSelect.onchange = onFormationSelect;
+if (ui.btnCancelTemplate) ui.btnCancelTemplate.onclick = () => ui.templateModal.classList.add("hidden");
+if (ui.btnCreateFromTemplate) ui.btnCreateFromTemplate.onclick = createFormationFromTemplate;
+
+/** -------------------------
+ *  Setup
+ *  ------------------------- */
+ui.btnExample.onclick = () => {
+  const sample = [];
+  for (let i=1;i<=17;i++){
+    const pref = (i<=4)?"ST":(i<=8)?"MF":(i<=14)?"DF":"GK";
+    sample.push(`Player ${i},${String(i).padStart(2,"0")},${pref}`);
+  }
+  ui.rosterInput.value = sample.join("\n");
+};
+
+ui.btnLoadRoster.onclick = async () => {
+  const lines = ui.rosterInput.value.split("\n").map(s=>s.trim()).filter(Boolean);
+  const players = [];
+  const seen = new Set();
+  for (const ln of lines) {
+    const parts = ln.split(",").map(s=>s.trim()).filter(s=>s.length);
+    const name = parts[0]; if (!name || seen.has(name)) continue;
+    seen.add(name);
+    const number = parts[1] || "";
+    const preferred = parts[2] || "";
+    players.push({name, number, preferred, totalSec: 0, onField:false, position:null, stintStart:null});
+  }
+  
+  // Get selected field size
+  const fieldSize = parseInt(ui.fieldSizeSelect.value);
+  const minPlayers = Math.max(fieldSize - 2, 7); // Allow some roster flexibility
+  
+  if (players.length < minPlayers) { 
+    alert(`Need at least ${minPlayers} players for ${fieldSize}v${fieldSize} format.`); 
+    return; 
+  }
+  
+  // Update client-side state and localStorage
+  state.players = players;
+  state.fieldSize = fieldSize;
+  saveLocal();
+  
+  // Sync with server-side using bulk roster update
+  try {
+    // Transform client players to server format
+    const serverPlayers = players.map(player => ({
+      name: player.name,
+      number: player.number || "",
+      preferred: player.preferred || ""
+    }));
+
+    const response = await fetch('/api/roster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        players: serverPlayers,
+        field_size: fieldSize
+      })
+    });
+
+    const result = await response.json();
+    
+    if (response.ok && result.success) {
+      alert(`Roster loaded and synced with server! ${result.message}`);
+    } else {
+      console.error('Server sync failed:', result.error || response.statusText);
+      alert("Roster loaded locally, but server sync failed. Players page may not show data.");
+    }
+  } catch (error) {
+    console.error('Failed to sync with server:', error);
+    alert("Roster loaded locally, but server sync failed. Players page may not show data.");
+  }
+};
+
+ui.btnSave.onclick = () => {
+  // snapshot live totals for save
+  const snap = JSON.parse(JSON.stringify(state));
+  const n = nowSec();
+  snap.players.forEach(p=>{
+    if (p.onField && p.stintStart) {
+      p.totalSec += (n - p.stintStart);
+      // keep stintStart so live resume matches reality
+    }
+  });
+  const blob = new Blob([JSON.stringify(snap,null,2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `sideline_${new Date().toISOString().replace(/[:.]/g,"-")}.json`;
+  a.click();
+};
+
+ui.btnLoad.onclick = () => ui.fileLoad.click();
+ui.fileLoad.onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const txt = await file.text();
+  try {
+    const obj = JSON.parse(txt);
+    // basic shape validation
+    if (!Array.isArray(obj.players)) throw new Error("Invalid file");
+    state = obj;
+    saveLocal();
+    renderAll();
+    alert("Game loaded.");
+  } catch (err) {
+    alert("Failed to load: "+err.message);
+  } finally {
+    e.target.value = "";
+  }
+};
+
+ui.btnClear.onclick = () => {
+  if (confirm("Clear roster and game state?")) resetAll();
+};
+
+ui.btnSetSchedule.onclick = () => {
+  const t = ui.scheduledHHMM.value.trim();
+  if (!t || !/^\d{1,2}:\d{2}$/.test(t)) { alert("Use HH:MM (24-hour)"); return; }
+  const [hh,mm] = t.split(":").map(Number);
+  const d = new Date();
+  d.setHours(hh, mm, 0, 0);
+  state.scheduledStartTs = Math.floor(d.getTime()/1000);
+  saveLocal();
+  renderSetup();
+};
+
+ui.btnStart.onclick = startGame;
+ui.btnPause.onclick = pauseGame;
+ui.btnHalftime.onclick = startHalftime;
+ui.btnEndHalftime.onclick = endHalftime;
+ui.btnApplyFormat.onclick = () => {
+  const minutes = parseInt(ui.formatMinutes.value, 10);
+  const periods = parseInt(ui.formatPeriods.value, 10);
+  if (Number.isNaN(minutes) || Number.isNaN(periods)) { alert("Enter minutes and period count."); return; }
+  if (minutes < 10 || minutes > 120) { alert("Minutes must be between 10 and 120."); return; }
+  if (periods < 1 || periods > 4) { alert("Periods must be between 1 and 4."); return; }
+  if (minutes * 60 < periods * 60) { alert("Provide at least one minute per period."); return; }
+  if (state.gameStartTs) { alert("Stop/reset the game before changing the timer format."); return; }
+  state.gameLengthSec = minutes * 60;
+  state.periodCount = periods;
+  ensurePeriodArrays();
+  state.periodElapsed = Array(periods).fill(0);
+  state.periodAdjust = Array(periods).fill(0);
+  state.periodStoppage = Array(periods).fill(0);
+  state.currentPeriodIndex = 0;
+  state.periodStartTs = null;
+  recalcAggregateAdjustment();
+  saveLocal();
+  renderAll();
+};
+
+ui.adjustKind.onchange = () => {
+  const isStoppage = ui.adjustKind.value === "stoppage";
+  ui.adjustAll.disabled = isStoppage;
+  if (isStoppage) ui.adjustAll.checked = false;
+};
+
+ui.btnApplyManual.onclick = () => {
+  ensurePeriodArrays();
+  const kind = ui.adjustKind.value;
+  const periodIndex = parseInt(ui.adjustPeriod.value, 10);
+  const seconds = parseInt(ui.adjustSeconds.value, 10);
+  if (Number.isNaN(periodIndex)) { alert("Select a period."); return; }
+  if (Number.isNaN(seconds)) { alert("Enter seconds (integer)."); return; }
+  if (kind === "adjustment") {
+    if (seconds === 0) { alert("Enter a non-zero adjustment."); return; }
+    if (ui.adjustAll.checked) {
+      for (let i = 0; i < state.periodCount; i++) {
+        state.periodAdjust[i] += seconds;
+      }
+    } else {
+      state.periodAdjust[periodIndex] += seconds;
+    }
+    recalcAggregateAdjustment();
+  } else {
+    if (seconds <= 0) { alert("Stoppage time must be positive seconds."); return; }
+    state.periodStoppage[periodIndex] = Math.max(0, state.periodStoppage[periodIndex] + seconds);
+  }
+  ui.adjustSeconds.value = "";
+  saveLocal();
+  renderAll();
+};
+
+/** -------------------------
+ *  Lineup
+ *  ------------------------- */
+function renderLineup() {
+  // slots - get dynamic slots based on formation or field size
+  const requiredSlots = getRequiredSlots();
+  ui.slotList.innerHTML = "";
+  requiredSlots.forEach((pos, idx)=>{
+    const li = document.createElement("li");
+    li.style.padding="6px 8px";
+    li.style.border="1px solid var(--line)";
+    li.style.borderRadius="8px";
+    li.style.marginBottom="6px";
+    li.style.cursor="pointer";
+    li.dataset.index = idx;
+    li.innerHTML = `<b>${idx+1}. ${pos}</b> – ${POS_FULL[pos]}`;
+    li.onclick = () => { selectedSlotIndex = idx; highlightSlots(); };
+    ui.slotList.appendChild(li);
+  });
+  highlightSlots();
+
+  // roster table
+  ui.rosterTable.innerHTML = "";
+  
+  // Get list of assigned players (excluding header)
+  const assignedPlayers = new Set();
+  Array.from(ui.assignTable.querySelectorAll("tbody tr td:nth-child(2)")).forEach(td => {
+    assignedPlayers.add(td.textContent);
+  });
+
+  state.players.slice().sort((a,b)=> (a.number||"").localeCompare(b.number||"") || a.name.localeCompare(b.name))
+    .forEach(p=>{
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${p.name}</td><td>${p.number||""}</td><td>${(p.preferred||"").toUpperCase()}</td>`;
+      
+      // Check if player is already assigned
+      if (assignedPlayers.has(p.name)) {
+        tr.classList.add('player-used');
+        tr.onclick = () => alert(`${p.name} is already assigned to a position.`);
+      } else {
+        tr.style.cursor="pointer";
+        tr.onclick = ()=>assignSelectedSlot(p.name);
+      }
+      
+      ui.rosterTable.appendChild(tr);
+    });
+
+  // Don't clear assignment table - let assignments persist
+}
+
+function highlightSlots() {
+  // Get current assignments to check which slots are filled (excluding header)
+  const assignedSlots = new Set();
+  Array.from(ui.assignTable.querySelectorAll("tbody tr")).forEach(r=>{
+    if (r.children.length >= 2) {
+      const slotText = r.children[0].textContent; // "1. GK"
+      const slotIndex = parseInt(slotText.split('.')[0]) - 1;
+      assignedSlots.add(slotIndex);
+    }
+  });
+
+  Array.from(ui.slotList.children).forEach((li,i)=>{
+    // Remove classes first
+    li.classList.remove('slot-filled');
+    
+    // Add filled class if slot is assigned (this preserves the visual cue)
+    if (assignedSlots.has(i)) {
+      li.classList.add('slot-filled');
+    }
+    
+    // Set background for selected slot (this overrides filled background for selected slot)
+    if (i === selectedSlotIndex) {
+      li.style.background = "#0c1732";
+    } else if (!assignedSlots.has(i)) {
+      li.style.background = "transparent";
+    }
+  });
+}
+
+function updateRosterVisualCues() {
+  // Get list of assigned players (excluding header)
+  const assignedPlayers = new Set();
+  Array.from(ui.assignTable.querySelectorAll("tbody tr td:nth-child(2)")).forEach(td => {
+    assignedPlayers.add(td.textContent);
+  });
+
+  // Update existing roster table rows
+  Array.from(ui.rosterTable.querySelectorAll("tr")).forEach(tr => {
+    const playerName = tr.children[0].textContent;
+    
+    // Remove existing classes
+    tr.classList.remove('player-used');
+    
+    // Check if player is assigned
+    if (assignedPlayers.has(playerName)) {
+      tr.classList.add('player-used');
+      tr.onclick = () => alert(`${playerName} is already assigned to a position.`);
+      tr.style.cursor = "not-allowed";
+    } else {
+      tr.style.cursor = "pointer";
+      tr.onclick = () => assignSelectedSlot(playerName);
+    }
+  });
+}
+
+function assignSelectedSlot(playerName) {
+  if (selectedSlotIndex===null) { alert("Select a slot on the left first."); return; }
+  // prevent duplicate player (excluding header)
+  const existing = Array.from(ui.assignTable.querySelectorAll("tbody tr td:nth-child(2)")).map(td=>td.textContent);
+  if (existing.includes(playerName)) { alert("Player already assigned."); return; }
+
+  // Get dynamic slots
+  const requiredSlots = getRequiredSlots();
+  
+  // remove previous assignment on this slot (excluding header)
+  const slotLabel = `${selectedSlotIndex+1}. ${requiredSlots[selectedSlotIndex]}`;
+  const rows = Array.from(ui.assignTable.querySelectorAll("tbody tr"));
+  for (const r of rows) {
+    if (r.children[0].textContent === slotLabel) r.remove();
+  }
+
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${slotLabel}</td><td>${playerName}</td>`;
+  ui.assignTable.appendChild(tr);
+  
+  // Refresh visual cues after assignment (without clearing assignments)
+  highlightSlots();
+  
+  // Update player visual cues by re-rendering just the roster table
+  updateRosterVisualCues();
+}
+
+ui.btnClearAssign.onclick = () => { 
+  ui.assignTable.innerHTML = ""; 
+  highlightSlots(); // Refresh slot visual cues
+  updateRosterVisualCues(); // Refresh player visual cues
+};
+
+ui.btnStartGame.onclick = async () => {
+  console.log('[DEBUG] Start Game button clicked');
+  try {
+    // Disable button to prevent double-clicking
+    ui.btnStartGame.disabled = true;
+    ui.btnStartGame.textContent = 'Validating...';
+    
+    console.log('[DEBUG] Starting validation...');
+    
+    // Build assignments (excluding header)
+    const assigned = {};
+    const assignmentRows = Array.from(ui.assignTable.querySelectorAll("tbody tr"));
+    
+    if (assignmentRows.length === 0) {
+      showError('No player assignments found. Please assign players to positions first.');
+      return;
+    }
+    
+    assignmentRows.forEach(row => {
+      const slot = row.children[0].textContent; // "1. GK"
+      const pos = slot.split(".")[1].trim().split(" ")[0];
+      const name = row.children[1].textContent;
+      
+      if (!name || name.trim() === '') {
+        throw new Error(`Position ${slot} is not assigned to any player`);
+      }
+      
+      assigned[pos] = (assigned[pos] || []).concat([name]);
+    });
+    
+    // Calculate required positions dynamically from the lineup slots
+    const requiredSlots = getRequiredSlots();
+    console.log('[DEBUG] Required slots:', requiredSlots);
+    
+    const need = {GK: 0, DF: 0, MF: 0, ST: 0};
+    requiredSlots.forEach(pos => {
+      need[pos] = (need[pos] || 0) + 1;
+    });
+    
+    console.log('[DEBUG] Calculated needs:', need);
+    
+    const got = {
+      GK: (assigned.GK || []).length, 
+      DF: (assigned.DF || []).length, 
+      MF: (assigned.MF || []).length, 
+      ST: (assigned.ST || []).length
+    };
+    
+    console.log('[DEBUG] Got assignments:', got);
+    
+    // Check formation completeness
+    const validationErrors = [];
+    const warnings = [];
+    
+    for (const [position, required] of Object.entries(need)) {
+      if (required === 0) continue; // Skip positions not needed
+      const actual = got[position];
+      if (actual < required) {
+        validationErrors.push(`Need ${required} ${position} player(s), only have ${actual}`);
+      } else if (actual > required) {
+        validationErrors.push(`Too many ${position} players: need ${required}, have ${actual}`);
+      }
+    }
+    
+    // Check for duplicate player assignments
+    const allAssignedPlayers = [];
+    for (const players of Object.values(assigned)) {
+      allAssignedPlayers.push(...players);
+    }
+    
+    const uniquePlayers = new Set(allAssignedPlayers);
+    if (uniquePlayers.size !== allAssignedPlayers.length) {
+      validationErrors.push('Same player assigned to multiple positions');
+    }
+    
+    // Check if all assigned players exist in roster
+    const availablePlayers = state.players.map(p => p.name);
+    for (const playerName of allAssignedPlayers) {
+      if (!availablePlayers.includes(playerName)) {
+        validationErrors.push(`Player "${playerName}" not found in roster`);
+      }
+    }
+    
+    // Check position preferences and add warnings
+    for (const [position, players] of Object.entries(assigned)) {
+      for (const playerName of players) {
+        const player = state.players.find(p => p.name === playerName);
+        if (player && player.preferred) {
+          const preferredPositions = player.preferred.split(',').map(p => p.trim().toUpperCase());
+          if (!preferredPositions.includes(position)) {
+            warnings.push(`${playerName} is playing ${position} but prefers ${player.preferred}`);
+          }
+        }
+      }
+    }
+    
+    // Show validation errors if any
+    if (validationErrors.length > 0) {
+      const errorMessage = 'Cannot start game - lineup validation failed:\n\n' + 
+                          validationErrors.join('\n') + 
+                          '\n\nPlease fix these issues and try again.';
+      showError(errorMessage);
+      return;
+    }
+    
+    // Show warnings if any (but allow game to start)
+    if (warnings.length > 0) {
+      const warningMessage = 'Starting game with the following warnings:\n\n' + 
+                            warnings.join('\n') + 
+                            '\n\nDo you want to continue?';
+      
+      if (!confirm(warningMessage)) {
+        return;
+      }
+    }
+    
+    ui.btnStartGame.textContent = 'Starting Game...';
+    
+    // Try API-based game start with formation validation
+    try {
+      const response = await fetch('/api/timer/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          formation_name: state.currentFormation || null
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        // Show detailed API validation errors
+        let errorMessage = data.error || 'Failed to start game';
+        
+        if (data.validation_errors && data.validation_errors.length > 0) {
+          errorMessage += '\n\nValidation errors:\n' + data.validation_errors.join('\n');
+        }
+        
+        if (data.suggestions && data.suggestions.length > 0) {
+          errorMessage += '\n\nSuggestions:\n' + data.suggestions.join('\n');
+        }
+        
+        showError(errorMessage);
+        return;
+      }
+      
+      // Show API warnings if any
+      if (data.warnings && data.warnings.length > 0) {
+        const apiWarnings = 'Game started with warnings:\n' + data.warnings.join('\n');
+        console.warn(apiWarnings);
+        // Could show a toast notification here instead of alert
+      }
+      
+      // Success - apply the lineup and start the game
+      await applyLineupAndStartGame(assigned);
+      
+    } catch (apiError) {
+      console.warn('API game start failed, falling back to local:', apiError);
+      
+      // Fallback to local game start
+      await applyLineupAndStartGame(assigned);
+    }
+    
+  } catch (error) {
+    console.error('Error starting game:', error);
+    showError(`Failed to start game: ${error.message}`);
+  } finally {
+    // Re-enable button
+    ui.btnStartGame.disabled = false;
+    ui.btnStartGame.textContent = 'Start Game';
+  }
+};
+
+// Helper function to show errors with better UX
+function showError(message) {
+  // Create a more user-friendly error display
+  const errorDiv = document.createElement('div');
+  errorDiv.style.cssText = `
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--over); color: white; padding: 16px 24px;
+    border-radius: 8px; z-index: 10000; max-width: 80%;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  `;
+  errorDiv.innerHTML = `
+    <strong>⚠️ Lineup Validation Error</strong><br>
+    <div style="margin-top: 8px; white-space: pre-line;">${message}</div>
+    <button onclick="this.parentElement.remove()" style="
+      margin-top: 12px; background: rgba(255,255,255,0.2); 
+      border: 1px solid rgba(255,255,255,0.3); color: white;
+      padding: 4px 12px; border-radius: 4px; cursor: pointer;
+    ">Close</button>
+  `;
+  
+  document.body.appendChild(errorDiv);
+  
+  // Auto-remove after 10 seconds
+  setTimeout(() => {
+    if (errorDiv.parentElement) {
+      errorDiv.remove();
+    }
+  }, 10000);
+}
+
+// Extracted function to apply lineup and start game
+async function applyLineupAndStartGame(assigned) {
+  // Reset and apply lineup
+  const n = nowSec();
+  state.players.forEach(p => { 
+    p.onField = false; 
+    p.position = null; 
+    p.stintStart = null; 
+  });
+  
+  for (const [pos, names] of Object.entries(assigned)) {
+    for (const nm of names) {
+      const p = state.players.find(x => x.name === nm);
+      if (p) { 
+        p.onField = true; 
+        p.position = pos; 
+        p.stintStart = n; 
+      }
+    }
+  }
+  
+  const firstStart = !state.gameStartTs;
+  if (firstStart) state.gameStartTs = n;
+  
+  ensurePeriodArrays();
+  if (firstStart) {
+    state.currentPeriodIndex = 0;
+    state.periodElapsed = Array(state.periodCount).fill(0);
+  }
+  
+  state.periodStartTs = n;
+  state.breakActive = false;
+  state.paused = false;
+  
+  saveLocal();
+  show("game");
+  renderGame();
+  startTick();
+  
+  // Show success message
+  const successDiv = document.createElement('div');
+  successDiv.style.cssText = `
+    position: fixed; top: 20px; right: 20px;
+    background: var(--ok); color: white; padding: 12px 20px;
+    border-radius: 8px; z-index: 10000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  `;
+  successDiv.innerHTML = '✅ Game started successfully!';
+  
+  document.body.appendChild(successDiv);
+  setTimeout(() => successDiv.remove(), 3000);
+}
+
+/** -------------------------
+ *  Game
+ *  ------------------------- */
+function startGame() {
+  // Clear any existing scheduled start to prevent infinite retries before attempting to start
+  const wasScheduled = state.scheduledStartTs !== null;
+  if (wasScheduled) {
+    console.log('Clearing scheduled start time before attempting game start');
+    state.scheduledStartTs = null;
+    saveLocal();
+  }
+  
+  // Try API first, fall back to local
+  apiStartGame().catch((error) => {
+    console.warn('API start game failed:', error);
+    
+    // If this was a scheduled start, show warning and don't fall back
+    if (wasScheduled) {
+      showNotification('Cannot start game automatically - check lineup and try manual start', 'warning');
+      return; // Don't fall back to local implementation for scheduled starts
+    }
+    
+    // Fallback to original local implementation (only for manual starts)
+    ensurePeriodArrays();
+    const n = nowSec();
+    const firstStart = !state.gameStartTs;
+    if (firstStart) {
+      state.gameStartTs = n;
+      state.currentPeriodIndex = 0;
+      state.periodElapsed = Array(state.periodCount).fill(0);
+    }
+    if (!state.periodStartTs || state.paused || state.breakActive) {
+      state.periodStartTs = n;
+    }
+    state.breakActive = false;
+    state.paused = false;
+    state.players.forEach(p=>{
+      if (p.onField && !p.stintStart) p.stintStart = n;
+    });
+    saveLocal();
+    renderGame();
+    startTick();
+  });
+}
+
+function pauseGame() {
+  // Try API first, fall back to local
+  apiPauseGame().catch(() => {
+    // Fallback to original local implementation
+    if (state.paused) return;
+    const n = nowSec();
+    ensurePeriodArrays();
+    if (state.periodStartTs) {
+      state.periodElapsed[state.currentPeriodIndex] += Math.max(0, n - state.periodStartTs);
+      state.periodStartTs = null;
+    }
+    state.players.forEach(p=>{
+      if (p.onField && p.stintStart) {
+        p.totalSec += (n - p.stintStart);
+        p.stintStart = null;
+      }
+    });
+    state.paused = true;
+    saveLocal();
+    renderGame();
+    stopTick();
+  });
+}
+
+function startHalftime() {
+  // Try API first, fall back to local
+  apiStartHalftime().catch(() => {
+    // Fallback to original local implementation
+    pauseGame();
+    state.breakActive = true;
+    state.halftimeEndTs = nowSec() + Math.floor(HALFTIME_MIN*60);
+    saveLocal();
+    renderGame();
+    startTick(); // to show countdown
+  });
+}
+
+function endHalftime() {
+  ensurePeriodArrays();
+  state.breakActive = false;
+  state.halftimeEndTs = null;
+  if (state.currentPeriodIndex < state.periodCount - 1) {
+    state.currentPeriodIndex += 1;
+  }
+  const n = nowSec();
+  state.periodStartTs = n;
+  state.paused = false;
+  if (!state.gameStartTs) state.gameStartTs = n;
+  state.players.forEach(p=>{
+    if (p.onField && !p.stintStart) p.stintStart = n;
+  });
+  saveLocal();
+  renderGame();
+  startTick();
+}
+
+ui.gStart.onclick = startGame;
+ui.gPause.onclick = pauseGame;
+ui.gHalf.onclick = startHalftime;
+ui.gSave.onclick = () => ui.btnSave.click();
+
+function renderGame() {
+  ensurePeriodArrays();
+  const elapsed = gameElapsedSeconds();
+  const target = state.gameLengthSec + totalStoppageSeconds();
+  ui.clockLabel.textContent = `${fmtMMSS(elapsed)} / ${fmtMMSS(target)}`;
+  ui.statusLabel.textContent = state.paused ? "PAUSED" : "RUNNING";
+
+  const periodLabel = describePeriodLabel(state.currentPeriodIndex + 1, state.periodCount);
+  ui.periodPill.textContent = `${periodLabel} (${state.currentPeriodIndex + 1}/${state.periodCount})`;
+  ui.metaPill.textContent = `Stoppage ${fmtMMSS(totalStoppageSeconds())} • Adjust ${fmtSignedMMSS(totalAdjustmentSeconds())}`;
+
+  if (state.breakActive) {
+    if (state.halftimeEndTs && nowSec() <= state.halftimeEndTs) {
+      const remain = Math.max(0, state.halftimeEndTs - nowSec());
+      ui.halfLabel.style.display = "";
+      ui.halfLabel.textContent = `BREAK ${fmtMMSS(remain)}`;
+    } else {
+      ui.halfLabel.style.display = "";
+      ui.halfLabel.textContent = "BREAK";
+    }
+  } else {
+    ui.halfLabel.style.display = "none";
+  }
+
+  if (state.scheduledStartTs && !state.gameStartTs) {
+    const delta = state.scheduledStartTs - nowSec();
+    if (delta > 0) {
+      ui.schedLabel.style.display = "";
+      ui.schedLabel.textContent = `Starts in ${fmtMMSS(delta)}`;
+    } else {
+      ui.schedLabel.style.display = "";
+      ui.schedLabel.textContent = `Starting…`;
+      // Prevent calling startGame multiple times rapidly
+      if (!window._gameStartAttempted) {
+        window._gameStartAttempted = true;
+        
+        // Before attempting scheduled start, verify prerequisites
+        if (!state.roster || Object.keys(state.roster).length === 0) {
+          console.warn('Scheduled start cancelled: No players in roster');
+          ui.schedLabel.textContent = 'Cannot start: Add players first';
+          ui.schedLabel.style.color = 'red';
+          // Clear the scheduled start since prerequisites aren't met
+          state.scheduledStartTs = null;
+          saveLocal();
+          window._gameStartAttempted = false;
+          return;
+        }
+        
+        startGame();
+        // Reset flag after a reasonable delay
+        setTimeout(() => { 
+          window._gameStartAttempted = false;
+        }, 2000);
+      }
+    }
+  } else {
+    ui.schedLabel.style.display = "none";
+  }
+
+  ui.periodTable.innerHTML = "";
+  const now = nowSec();
+  for (let i = 0; i < state.periodCount; i++) {
+    const running = (i === state.currentPeriodIndex && state.periodStartTs && !state.paused && !state.breakActive)
+      ? Math.max(0, now - state.periodStartTs)
+      : 0;
+    const elapsedReg = (state.periodElapsed[i] || 0) + running;
+    const adjust = state.periodAdjust[i] || 0;
+    const stoppage = state.periodStoppage[i] || 0;
+    const remain = periodRemainingSeconds(i);
+    const tr = document.createElement("tr");
+    if (i === state.currentPeriodIndex && !state.breakActive) {
+      tr.style.fontWeight = "600";
+    }
+    tr.innerHTML = `
+      <td>${describePeriodLabel(i + 1, state.periodCount)}</td>
+      <td>${fmtMMSS(periodRegulationSeconds(i))}</td>
+      <td>${fmtMMSS(elapsedReg)}</td>
+      <td>${fmtSignedMMSS(adjust)}</td>
+      <td>${fmtMMSS(stoppage)}</td>
+      <td>${fmtMMSS(remain)}</td>
+    `;
+    ui.periodTable.appendChild(tr);
+  }
+
+  // On-field table
+  ui.onFieldTable.innerHTML = "";
+  const order = {GK:0, DF:1, MF:2, ST:3};
+  const on = state.players.filter(p=>p.onField).sort((a,b)=>
+     (order[a.position||"Z"] - order[b.position||"Z"]) ||
+     (a.number||"").localeCompare(b.number||"") ||
+     a.name.localeCompare(b.name));
+
+  on.forEach(p=>{
+    const stint = currentStint(p);
+    const total = totalLive(p);
+    const tr = document.createElement("tr");
+    tr.onclick = ()=>{ selectedOutName = p.name; highlightSelections(); };
+    tr.style.cursor = 'pointer';
+    // Add selection highlighting
+    if (selectedOutName === p.name) {
+      tr.className = 'selected-out';
+    }
+    tr.innerHTML = `
+      <td>${p.position||"-"}</td>
+      <td>${p.name}</td>
+      <td>${p.number||""}</td>
+      <td>${fmtMMSS(stint)}</td>
+      <td><span class="fair ${fairnessClass(total)}">${fmtMMSS(total)}</span></td>
+      <td>${(p.preferred||"").toUpperCase()}</td>`;
+    ui.onFieldTable.appendChild(tr);
+  });
+
+  // Roster table
+  ui.rosterGameTable.innerHTML = "";
+  state.players.slice().sort((a,b)=> (a.onField===b.onField?0:a.onField?-1:1) || (a.number||"").localeCompare(b.number||"") || a.name.localeCompare(b.name))
+    .forEach(p=>{
+      const stint = currentStint(p);
+      const total = totalLive(p);
+      const tr = document.createElement("tr");
+      tr.onclick = ()=>{ selectedInName = p.name; highlightSelections(); };
+      tr.style.cursor = 'pointer';
+      // Add selection highlighting
+      if (selectedInName === p.name) {
+        tr.className = 'selected-in';
+      }
+      tr.innerHTML = `
+        <td>${p.name}</td>
+        <td>${p.number||""}</td>
+        <td>${p.onField?'<span class="pill status-in">IN</span>':'<span class="pill status-out">OUT</span>'}</td>
+        <td>${p.position||"-"}</td>
+        <td>${fmtMMSS(stint)}</td>
+        <td><span class="fair ${fairnessClass(total)}">${fmtMMSS(total)}</span></td>
+        <td>${(p.preferred||"").toUpperCase()}</td>`;
+      ui.rosterGameTable.appendChild(tr);
+    });
+
+  // queue
+  ui.queueList.innerHTML = "";
+  subQueue.forEach((q, i)=>{
+    const outPlayer = state.players.find(p => p.name === q.out);
+    const inPlayer = state.players.find(p => p.name === q.in);
+    const position = outPlayer?.position || '?';
+    const outNum = outPlayer?.number || '';
+    const inNum = inPlayer?.number || '';
+    
+    const div = document.createElement("div");
+    div.className = "queue-item";
+    div.innerHTML = `
+      <div class="row" style="flex:1;align-items:center;">
+        <span class="player-out">${q.out} #${outNum}</span>
+        <span class="position-badge">${position}</span>
+        <span class="sub-arrow">➜</span>
+        <span class="player-in">${q.in} #${inNum}</span>
+        ${inPlayer?.onField ? '<span class="pill" style="background:var(--warn);color:#1b1400;margin-left:8px;">Position Swap</span>' : ''}
+      </div>
+      <button class="btn" onclick="removeQueue(${i})">✕ Remove</button>
+    `;
+    ui.queueList.appendChild(div);
+  });
+
+  renderReports();
+}
+
+function highlightSelections() {
+  // Update selection status display
+  const statusDiv = document.getElementById('selectionStatus');
+  const outDisplay = document.getElementById('outPlayerDisplay');
+  const inDisplay = document.getElementById('inPlayerDisplay');
+  
+  if (selectedOutName || selectedInName) {
+    statusDiv.style.display = 'block';
+    
+    if (selectedOutName) {
+      const outPlayer = state.players.find(p => p.name === selectedOutName);
+      const outNum = outPlayer?.number || '';
+      const outPos = outPlayer?.position || '?';
+      outDisplay.innerHTML = `${selectedOutName} #${outNum} <span class="position-badge">${outPos}</span>`;
+    } else {
+      outDisplay.textContent = 'Click player in "On Field" table';
+    }
+    
+    if (selectedInName) {
+      const inPlayer = state.players.find(p => p.name === selectedInName);
+      const inNum = inPlayer?.number || '';
+      const inStatus = inPlayer?.onField ? ' (currently on field - will swap positions)' : '';
+      inDisplay.innerHTML = `${selectedInName} #${inNum}${inStatus}`;
+    } else {
+      inDisplay.textContent = 'Click player in "Roster" table';
+    }
+  } else {
+    statusDiv.style.display = 'none';
+  }
+  
+  // Re-render game to update table highlighting
+  renderGame();
+}
+
+ui.btnQueue.onclick = () => {
+  if (!selectedOutName) { 
+    alert("⚠️ Please select a player from the 'On Field' table to substitute OUT."); 
+    return; 
+  }
+  if (!selectedInName) { 
+    alert("⚠️ Please select a player from the 'Roster' table to substitute IN."); 
+    return; 
+  }
+  if (selectedOutName === selectedInName) { 
+    alert("⚠️ Cannot substitute a player for themselves. Please select different players."); 
+    return; 
+  }
+
+  // Label includes target slot (out player's position)
+  const outP = state.players.find(p=>p.name===selectedOutName);
+  const inP = state.players.find(p=>p.name===selectedInName);
+  const label = inP.name + (inP.onField ? ` (swap to ${outP.position})` : "");
+  subQueue.push({out: selectedOutName, in: selectedInName, _label: label});
+  
+  // Clear selections after adding to queue
+  selectedOutName = null; 
+  selectedInName = null;
+  highlightSelections();
+};
+
+ui.btnClearQueue.onclick = () => { subQueue = []; renderGame(); };
+
+function removeQueue(i) { subQueue.splice(i,1); renderGame(); }
+window.removeQueue = removeQueue; // expose for onclick
+
+ui.btnCommit.onclick = () => {
+  if (!subQueue.length) { alert("No subs queued."); return; }
+  const n = nowSec();
+  subQueue.forEach(q=>{
+    const pOut = state.players.find(p=>p.name===q.out);
+    const pIn  = state.players.find(p=>p.name===q.in);
+    if (!pOut || !pIn || !pOut.onField || !pOut.position) return;
+
+    // if IN is on field → position swap (both stay on field, just swap positions)
+    if (pIn.onField) {
+      // Save both positions
+      const outPos = pOut.position;
+      const inPos = pIn.position;
+      
+      // Swap positions - both players stay on field
+      pOut.position = inPos;
+      pIn.position = outPos;
+    } else {
+      // Regular substitution: OUT comes off, IN goes on
+      // Save the position before clearing it
+      const positionToFill = pOut.position;
+
+      // end OUT stint
+      if (pOut.stintStart) { pOut.totalSec += (n - pOut.stintStart); }
+      pOut.onField = false; pOut.position = null; pOut.stintStart = null;
+
+      // Start IN stint
+      pIn.onField = true; pIn.position = positionToFill; pIn.stintStart = n;
+    }
+  });
+  subQueue = [];
+  saveLocal();
+  renderGame();
+};
+
+function startTick() {
+  if (tickHandle) return;
+  tickHandle = setInterval(()=>{
+    // halftime countdown end
+    if (state.halftimeEndTs && nowSec() >= state.halftimeEndTs) {
+      state.halftimeEndTs = null;
+      state.breakActive = false;
+      saveLocal();
+      alert("Halftime complete. Press Start/Resume to continue.");
+    }
+    renderGame();
+    renderReports();
+  }, 1000);
+}
+function stopTick(){ if (tickHandle) { clearInterval(tickHandle); tickHandle = null; } }
+
+function renderReports() {
+  if (!ui.reportSummary) return;
+  const snapshot = buildReportSnapshot();
+
+  if (!snapshot) {
+    ui.reportSummary.textContent = "Add players to view analytics.";
+    ui.reportDetail.textContent = "";
+    ui.reportDistribution.textContent = "";
+    ui.reportTargets.textContent = "";
+    ui.reportElapsed.textContent = "";
+    ui.reportTable.innerHTML = "";
+    return;
+  }
+
+  const elapsedRounded = Math.round(snapshot.elapsed);
+  const totalTargetRounded = Math.round(snapshot.totalTarget);
+  const regulationRounded = Math.round(snapshot.regulationSeconds);
+  const stoppageRounded = Math.round(snapshot.stoppage);
+  const adjustmentsRounded = Math.round(snapshot.adjustments);
+  const remaining = Math.max(0, totalTargetRounded - elapsedRounded);
+
+  ui.reportSummary.textContent = `Elapsed ${fmtMMSS(elapsedRounded)} / Target ${fmtMMSS(totalTargetRounded)} — ${snapshot.rosterSize} players`;
+  ui.reportDetail.textContent = `Regulation ${fmtMMSS(regulationRounded)} • Stoppage ${fmtMMSS(stoppageRounded)} • Adjust ${fmtSignedMMSS(adjustmentsRounded)}`;
+  ui.reportTargets.textContent = `Per player target ${fmtMMSS(snapshot.perPlayerRounded)}`;
+  ui.reportElapsed.textContent = `Remaining ${fmtMMSS(remaining)}`;
+
+  const fairness = snapshot.fairnessCounts || { under: 0, ok: 0, over: 0 };
+  const fairnessParts = [
+    `${fairness.under || 0} under`,
+    `${fairness.ok || 0} on target`,
+    `${fairness.over || 0} over`,
+  ];
+  ui.reportDistribution.textContent = `Average ${fmtMMSS(Math.round(snapshot.average))} • Median ${fmtMMSS(Math.round(snapshot.median))} • Range ${fmtMMSS(Math.round(snapshot.min))}–${fmtMMSS(Math.round(snapshot.max))} • Fairness ${fairnessParts.join(" / ")}`;
+
+  ui.reportTable.innerHTML = "";
+  snapshot.rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const preferred = row.preferredDisplay || "—";
+    const shareText = `${row.targetSharePercent.toFixed(1)}%`;
+    tr.innerHTML = `
+      <td>${row.name}</td>
+      <td>${row.number}</td>
+      <td>${preferred}</td>
+      <td>${row.status}</td>
+      <td><span class="fair ${row.fairness}">${fmtMMSS(Math.round(row.cumulativeSeconds))}</span></td>
+      <td>${fmtMMSS(snapshot.perPlayerRounded)}</td>
+      <td><span class="fair ${row.fairness}">${fmtSignedMMSS(Math.round(row.deltaSeconds))}</span></td>
+      <td>${shareText}</td>
+    `;
+    ui.reportTable.appendChild(tr);
+  });
+}
+
+/** -------------------------
+ *  Setup view secondary render
+ *  ------------------------- */
+function renderSetup() {
+  if (state.scheduledStartTs) {
+    const d = new Date(state.scheduledStartTs*1000);
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    ui.scheduledLabel.textContent = `Scheduled for ${hh}:${mm}`;
+  } else {
+    ui.scheduledLabel.textContent = "";
+  }
+  ui.formatMinutes.value = Math.round(state.gameLengthSec/60);
+  ui.formatPeriods.value = String(state.periodCount);
+  updatePeriodOptions();
+}
+
+function updatePeriodOptions() {
+  ensurePeriodArrays();
+  ui.adjustPeriod.innerHTML = "";
+  for (let i = 0; i < state.periodCount; i++) {
+    const option = document.createElement("option");
+    option.value = String(i);
+    option.textContent = describePeriodLabel(i + 1, state.periodCount);
+    ui.adjustPeriod.appendChild(option);
+  }
+  if (state.periodCount > 0 && !ui.adjustPeriod.value) {
+    ui.adjustPeriod.value = "0";
+  }
+  if (typeof ui.adjustKind.onchange === "function") {
+    ui.adjustKind.onchange();
+  }
+}
+
+/** -------------------------
+ *  Players View Functions
+ *  ------------------------- */
+
+let selectedPlayer = null;
+
+// Render the players table
+function renderPlayers() {
+  if (!ui.playersTable) return;
+  
+  fetch('/api/players')
+    .then(response => response.json())
+    .then(data => {
+      ui.playersTable.innerHTML = '';
+      
+      // Check if the API call was successful and extract the players array
+      if (data.success && Array.isArray(data.players)) {
+        data.players.forEach(player => {
+          const row = ui.playersTable.insertRow();
+          row.onclick = () => selectPlayer(player);
+          
+          // Calculate age if date_of_birth is available
+          let age = 'N/A';
+          if (player.date_of_birth) {
+            const birthDate = new Date(player.date_of_birth);
+            const today = new Date();
+            age = Math.floor((today - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
+          }
+          
+          // Get preferred positions
+          const positions = player.preferred || 'N/A';
+          
+          // Get games played from statistics
+          const gamesPlayed = player.statistics ? player.statistics.games_played : 0;
+          
+          row.innerHTML = `
+            <td>${player.name}</td>
+            <td>${player.number || 'N/A'}</td>
+            <td>${age}</td>
+            <td>${positions}</td>
+            <td>${gamesPlayed}</td>
+            <td>
+              <button onclick="event.stopPropagation(); editPlayerInline('${player.name}')">Edit</button>
+              <button onclick="event.stopPropagation(); deletePlayerInline('${player.name}')">Delete</button>
+            </td>
+          `;
+        });
+      } else {
+        // Handle case where API call failed or returned invalid data
+        console.warn('No players data received or API call failed:', data);
+        ui.playersTable.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #666;">No players found</td></tr>';
+      }
+    })
+    .catch(error => {
+      console.error('Error loading players:', error);
+      alert('Error loading players: ' + error.message);
+    });
+}
+
+// Select a player and show details
+function selectPlayer(player) {
+  selectedPlayer = player;
+  if (ui.playerDetails) {
+    ui.playerDetails.innerHTML = `
+      <h3>${player.name}</h3>
+      <p><strong>Position:</strong> ${player.position}</p>
+      <p><strong>Skill Level:</strong> ${player.skill_level}</p>
+      ${player.contact_info ? `
+        <h4>Contact Information</h4>
+        <p><strong>Phone:</strong> ${player.contact_info.phone || 'N/A'}</p>
+        <p><strong>Email:</strong> ${player.contact_info.email || 'N/A'}</p>
+        <p><strong>Emergency Contact:</strong> ${player.contact_info.emergency_contact || 'N/A'}</p>
+        <p><strong>Emergency Phone:</strong> ${player.contact_info.emergency_phone || 'N/A'}</p>
+      ` : ''}
+      ${player.medical_info ? `
+        <h4>Medical Information</h4>
+        <p><strong>Allergies:</strong> ${player.medical_info.allergies ? player.medical_info.allergies.join(', ') : 'None'}</p>
+        <p><strong>Medications:</strong> ${player.medical_info.medications ? player.medical_info.medications.join(', ') : 'None'}</p>
+        <p><strong>Medical Notes:</strong> ${player.medical_info.medical_notes || 'None'}</p>
+      ` : ''}
+      ${player.stats ? `
+        <h4>Statistics</h4>
+        <p><strong>Goals:</strong> ${player.stats.goals}</p>
+        <p><strong>Assists:</strong> ${player.stats.assists}</p>
+        <p><strong>Yellow Cards:</strong> ${player.stats.yellow_cards}</p>
+        <p><strong>Red Cards:</strong> ${player.stats.red_cards}</p>
+        <p><strong>Games Played:</strong> ${player.stats.games_played}</p>
+        <p><strong>Total Minutes:</strong> ${player.stats.total_minutes}</p>
+      ` : ''}
+    `;
+  }
+  
+  // Enable/disable action buttons based on selection
+  if (ui.btnEditPlayer) ui.btnEditPlayer.disabled = false;
+  if (ui.btnDeletePlayer) ui.btnDeletePlayer.disabled = false;
+  if (ui.btnPlayerStats) ui.btnPlayerStats.disabled = false;
+  if (ui.btnAttendance) ui.btnAttendance.disabled = false;
+}
+
+// Add new player
+function addPlayer() {
+  const name = prompt('Enter player name:');
+  if (!name) return;
+  
+  const position = prompt('Enter position (forward, midfielder, defender, goalkeeper):', 'midfielder');
+  if (!position) return;
+  
+  const skillLevel = prompt('Enter skill level (1-10):', '5');
+  if (!skillLevel) return;
+  
+  const playerData = {
+    name: name,
+    position: position,
+    skill_level: parseInt(skillLevel)
+  };
+  
+  fetch('/api/players', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(playerData)
+  })
+    .then(response => response.json())
+    .then(() => {
+      renderPlayers();
+      alert('Player added successfully!');
+    })
+    .catch(error => {
+      console.error('Error adding player:', error);
+      alert('Error adding player: ' + error.message);
+    });
+}
+
+// Edit selected player
+function editPlayer() {
+  if (!selectedPlayer) {
+    alert('Please select a player first.');
+    return;
+  }
+  
+  const name = prompt('Edit player name:', selectedPlayer.name);
+  if (name === null) return;
+  
+  const position = prompt('Edit position:', selectedPlayer.position);
+  if (position === null) return;
+  
+  const skillLevel = prompt('Edit skill level (1-10):', selectedPlayer.skill_level.toString());
+  if (skillLevel === null) return;
+  
+  const playerData = {
+    name: name,
+    position: position,
+    skill_level: parseInt(skillLevel)
+  };
+  
+  fetch(`/api/players/${selectedPlayer.name}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(playerData)
+  })
+    .then(response => response.json())
+    .then(() => {
+      renderPlayers();
+      selectedPlayer = null;
+      ui.playerDetails.innerHTML = '';
+      alert('Player updated successfully!');
+    })
+    .catch(error => {
+      console.error('Error updating player:', error);
+      alert('Error updating player: ' + error.message);
+    });
+}
+
+// Delete selected player
+function deletePlayer() {
+  if (!selectedPlayer) {
+    alert('Please select a player first.');
+    return;
+  }
+  
+  if (!confirm(`Are you sure you want to delete player ${selectedPlayer.name}?`)) {
+    return;
+  }
+  
+  fetch(`/api/players/${selectedPlayer.name}`, {
+    method: 'DELETE'
+  })
+    .then(() => {
+      renderPlayers();
+      selectedPlayer = null;
+      ui.playerDetails.innerHTML = '';
+      alert('Player deleted successfully!');
+    })
+    .catch(error => {
+      console.error('Error deleting player:', error);
+      alert('Error deleting player: ' + error.message);
+    });
+}
+
+// Inline edit player from table row
+function editPlayerInline(playerName) {
+  // Find the player in the current data
+  fetch('/api/players')
+    .then(response => response.json())
+    .then(data => {
+      const player = data.players.find(p => p.name === playerName);
+      if (!player) {
+        alert('Player not found');
+        return;
+      }
+      
+      const newNumber = prompt('Edit player number:', player.number || '');
+      if (newNumber === null) return; // User cancelled
+      
+      const newPreferred = prompt('Edit preferred position(s):', player.preferred || '');
+      if (newPreferred === null) return; // User cancelled
+      
+      // Update via API
+      fetch(`/api/players/${playerName}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          number: newNumber,
+          preferred: newPreferred
+        })
+      })
+        .then(response => response.json())
+        .then(() => {
+          renderPlayers();
+          alert('Player updated successfully!');
+        })
+        .catch(error => {
+          console.error('Error updating player:', error);
+          alert('Error updating player: ' + error.message);
+        });
+    })
+    .catch(error => {
+      console.error('Error fetching player:', error);
+      alert('Error fetching player: ' + error.message);
+    });
+}
+
+// Inline delete player from table row
+function deletePlayerInline(playerName) {
+  if (!confirm(`Are you sure you want to delete player ${playerName}?`)) {
+    return;
+  }
+  
+  fetch(`/api/players/${playerName}`, {
+    method: 'DELETE'
+  })
+    .then(() => {
+      renderPlayers();
+      alert('Player deleted successfully!');
+    })
+    .catch(error => {
+      console.error('Error deleting player:', error);
+      alert('Error deleting player: ' + error.message);
+    });
+}
+
+// Import players from CSV
+function importPlayers() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv';
+  input.onchange = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    fetch('/api/players/import', {
+      method: 'POST',
+      body: formData
+    })
+      .then(response => response.json())
+      .then(result => {
+        renderPlayers();
+        alert(`Import completed! Added ${result.added} players, updated ${result.updated} players.`);
+      })
+      .catch(error => {
+        console.error('Error importing players:', error);
+        alert('Error importing players: ' + error.message);
+      });
+  };
+  input.click();
+}
+
+// Export players to CSV
+function exportPlayers() {
+  fetch('/api/players/export')
+    .then(response => response.blob())
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'players.csv';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    })
+    .catch(error => {
+      console.error('Error exporting players:', error);
+      alert('Error exporting players: ' + error.message);
+    });
+}
+
+// Show player statistics
+function showPlayerStats() {
+  if (!selectedPlayer) {
+    alert('Please select a player first.');
+    return;
+  }
+  
+  fetch(`/api/players/${selectedPlayer.name}/stats`)
+    .then(response => response.json())
+    .then(stats => {
+      const statsWindow = window.open('', '_blank', 'width=600,height=400');
+      statsWindow.document.write(`
+        <html>
+        <head><title>${selectedPlayer.name} - Statistics</title></head>
+        <body>
+          <h2>${selectedPlayer.name} - Statistics</h2>
+          <table border="1" cellpadding="5">
+            <tr><td><strong>Goals:</strong></td><td>${stats.goals}</td></tr>
+            <tr><td><strong>Assists:</strong></td><td>${stats.assists}</td></tr>
+            <tr><td><strong>Yellow Cards:</strong></td><td>${stats.yellow_cards}</td></tr>
+            <tr><td><strong>Red Cards:</strong></td><td>${stats.red_cards}</td></tr>
+            <tr><td><strong>Games Played:</strong></td><td>${stats.games_played}</td></tr>
+            <tr><td><strong>Total Minutes:</strong></td><td>${stats.total_minutes}</td></tr>
+            <tr><td><strong>Average Minutes/Game:</strong></td><td>${stats.games_played > 0 ? Math.round(stats.total_minutes / stats.games_played) : 0}</td></tr>
+          </table>
+          <button onclick="window.close()">Close</button>
+        </body>
+        </html>
+      `);
+    })
+    .catch(error => {
+      console.error('Error loading player stats:', error);
+      alert('Error loading player stats: ' + error.message);
+    });
+}
+
+// Show attendance tracking
+function showAttendance() {
+  if (!selectedPlayer) {
+    alert('Please select a player first.');
+    return;
+  }
+  
+  fetch(`/api/players/${selectedPlayer.name}/attendance`)
+    .then(response => response.json())
+    .then(attendance => {
+      const attendanceWindow = window.open('', '_blank', 'width=600,height=400');
+      const attendanceRows = attendance.map(record => 
+        `<tr>
+          <td>${record.date}</td>
+          <td>${record.present ? 'Present' : 'Absent'}</td>
+          <td>${record.minutes_played || 0}</td>
+          <td>${record.notes || ''}</td>
+        </tr>`
+      ).join('');
+      
+      attendanceWindow.document.write(`
+        <html>
+        <head><title>${selectedPlayer.name} - Attendance</title></head>
+        <body>
+          <h2>${selectedPlayer.name} - Attendance</h2>
+          <table border="1" cellpadding="5">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Minutes Played</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${attendanceRows}
+            </tbody>
+          </table>
+          <button onclick="window.close()">Close</button>
+        </body>
+        </html>
+      `);
+    })
+    .catch(error => {
+      console.error('Error loading attendance:', error);
+      alert('Error loading attendance: ' + error.message);
+    });
+}
+
+/** -------------------------
+ *  Formations
+ *  ------------------------- */
+
+let currentFormation = null;
+
+async function renderFormations() {
+  try {
+    // Load formations
+    const response = await fetch('/api/formations');
+    const data = await response.json();
+    
+    if (data.success) {
+      const select = ui.formationSelect;
+      select.innerHTML = '<option value="">-- Select Formation --</option>';
+      
+      data.formations.forEach(formation => {
+        const option = document.createElement('option');
+        option.value = formation.name;
+        option.textContent = formation.name;
+        select.appendChild(option);
+      });
+    }
+  } catch (error) {
+    console.error('Failed to load formations:', error);
+  }
+  
+  // Initialize field
+  drawFieldMarkings();
+}
+
+function drawFieldMarkings() {
+  const markings = ui.fieldMarkings;
+  markings.innerHTML = `
+    <!-- Center line -->
+    <div style="position:absolute; left:50%; top:10px; bottom:10px; width:2px; background:white; transform:translateX(-50%);"></div>
+    <!-- Center circle -->
+    <div style="position:absolute; left:50%; top:50%; width:60px; height:60px; border:2px solid white; border-radius:50%; transform:translate(-50%, -50%);"></div>
+    <!-- Goals -->
+    <div style="position:absolute; left:10px; top:45%; width:20px; height:10%; background:transparent; border:2px solid white; border-left:none;"></div>
+    <div style="position:absolute; right:10px; top:45%; width:20px; height:10%; background:transparent; border:2px solid white; border-right:none;"></div>
+  `;
+}
+
+async function onFormationSelect() {
+  const selectedName = ui.formationSelect.value;
+  if (!selectedName) {
+    clearFormationDisplay();
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/formations/${encodeURIComponent(selectedName)}`);
+    const data = await response.json();
+    
+    if (data.success) {
+      currentFormation = data.formation;
+      displayFormation(currentFormation);
+    }
+  } catch (error) {
+    console.error('Failed to load formation:', error);
+  }
+}
+
+function displayFormation(formation) {
+  // Update form fields
+  ui.formationName.value = formation.name || '';
+  ui.formationType.value = formation.formation_type || '4-4-2';
+  ui.formationDescription.value = formation.description || '';
+  
+  // Draw positions on field
+  drawFormationPositions(formation);
+  
+  // Update info
+  const shape = getFormationShape(formation);
+  const fieldSize = state.fieldSize || 11;
+  const shapeText = shape.total >= fieldSize ? 
+    `${shape.def}-${shape.mid}-${shape.for}` : 
+    `Incomplete (${shape.total}/${fieldSize})`;
+  ui.formationInfo.textContent = `${formation.name}: ${shapeText}`;
+  
+  // Render position assignments
+  renderPositionAssignments(formation);
+}
+
+function drawFormationPositions(formation) {
+  const container = ui.formationPositions;
+  container.innerHTML = '';
+  
+  if (!formation.positions) return;
+  
+  formation.positions.forEach((position, index) => {
+    const dot = document.createElement('div');
+    const x = (position.x / 100) * (container.offsetWidth - 20) + 10;
+    const y = (position.y / 100) * (container.offsetHeight - 20) + 10;
+    
+    dot.style.cssText = `
+      position: absolute;
+      left: ${x}px;
+      top: ${y}px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: ${getPositionColor(position.position_code)};
+      border: 2px solid black;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      font-weight: bold;
+      color: white;
+      transform: translate(-50%, -50%);
+    `;
+    
+    if (position.player_name) {
+      dot.textContent = position.player_number || position.player_name.slice(0, 2);
+      dot.title = position.player_name;
+    } else {
+      dot.textContent = position.position_code?.slice(0, 2) || 'P';
+      dot.title = position.position_code || 'Position';
+    }
+    
+    container.appendChild(dot);
+  });
+}
+
+function getPositionColor(positionCode) {
+  if (!positionCode) return 'gray';
+  const code = positionCode.toUpperCase();
+  
+  if (code.includes('GK') || code.includes('GOALKEEPER')) return 'green';
+  if (code.includes('DEF') || code.includes('DEFENDER') || code.includes('CB') || code.includes('LB') || code.includes('RB')) return 'blue';
+  if (code.includes('MID') || code.includes('MIDFIELDER') || code.includes('CM') || code.includes('CDM') || code.includes('CAM')) return 'yellow';
+  if (code.includes('FOR') || code.includes('FORWARD') || code.includes('ST') || code.includes('LW') || code.includes('RW')) return 'red';
+  
+  return 'gray';
+}
+
+function getFormationShape(formation) {
+  if (!formation.positions) return { total: 0, gk: 0, def: 0, mid: 0, for: 0 };
+  
+  let gk = 0, def = 0, mid = 0, forward = 0;
+  
+  formation.positions.forEach(pos => {
+    if (!pos.position_code) return;
+    const code = pos.position_code.toUpperCase();
+    
+    if (code.includes('GK') || code.includes('GOALKEEPER')) gk++;
+    else if (code.includes('DEF') || code.includes('DEFENDER') || code.includes('CB') || code.includes('LB') || code.includes('RB')) def++;
+    else if (code.includes('MID') || code.includes('MIDFIELDER') || code.includes('CM') || code.includes('CDM') || code.includes('CAM')) mid++;
+    else if (code.includes('FOR') || code.includes('FORWARD') || code.includes('ST') || code.includes('LW') || code.includes('RW')) forward++;
+  });
+  
+  return { total: gk + def + mid + forward, gk, def, mid, for: forward };
+}
+
+function renderPositionAssignments(formation) {
+  const container = ui.positionAssignments;
+  container.innerHTML = '';
+  
+  if (!formation.positions) {
+    container.innerHTML = '<div class="hint">No positions defined</div>';
+    return;
+  }
+  
+  formation.positions.forEach((position, index) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginBottom = '8px';
+    
+    const label = document.createElement('div');
+    label.style.minWidth = '60px';
+    label.textContent = `${index + 1}. ${position.position_code || 'POS'}`;
+    
+    const select = document.createElement('select');
+    select.style.flex = '1';
+    select.innerHTML = '<option value="">-- Unassigned --</option>';
+    
+    // Add players to select
+    state.roster.forEach(player => {
+      const option = document.createElement('option');
+      option.value = player.name;
+      option.textContent = `${player.name} (${player.number || 'N/A'})`;
+      if (position.player_name === player.name) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+    
+    select.onchange = () => updatePlayerAssignment(index, select.value);
+    
+    row.appendChild(label);
+    row.appendChild(select);
+    container.appendChild(row);
+  });
+}
+
+async function updatePlayerAssignment(positionIndex, playerName) {
+  if (!currentFormation) return;
+  
+  try {
+    const assignments = {};
+    assignments[positionIndex] = playerName;
+    
+    const response = await fetch(`/api/formations/${encodeURIComponent(currentFormation.name)}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments })
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      currentFormation = data.formation;
+      drawFormationPositions(currentFormation);
+    }
+  } catch (error) {
+    console.error('Failed to update assignment:', error);
+  }
+}
+
+async function createNewFormation() {
+  const name = prompt('Formation name:');
+  if (!name) return;
+  
+  const type = ui.formationType.value || '4-4-2';
+  const description = prompt('Description (optional):') || '';
+  
+  try {
+    // Create basic positions for the formation type
+    const positions = generateFormationPositions(type);
+    
+    const response = await fetch('/api/formations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        formation_type: type,
+        description,
+        positions
+      })
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      await renderFormations();
+      ui.formationSelect.value = name;
+      await onFormationSelect();
+      alert('Formation created successfully!');
+    } else {
+      alert('Error: ' + data.error);
+    }
+  } catch (error) {
+    console.error('Failed to create formation:', error);
+    alert('Failed to create formation');
+  }
+}
+
+function generateFormationPositions(type) {
+  const positions = [];
+  
+  // Always start with goalkeeper (near left goal)
+  positions.push({ x: 5, y: 50, position_code: 'GK' });
+  
+  switch (type) {
+    case '4-4-2':
+      // Defenders
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 35, position_code: 'CB' });
+      positions.push({ x: 20, y: 65, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
+      // Midfielders
+      positions.push({ x: 55, y: 20, position_code: 'LM' });
+      positions.push({ x: 50, y: 40, position_code: 'CM' });
+      positions.push({ x: 50, y: 60, position_code: 'CM' });
+      positions.push({ x: 55, y: 80, position_code: 'RM' });
+      // Forwards
+      positions.push({ x: 80, y: 40, position_code: 'ST' });
+      positions.push({ x: 80, y: 60, position_code: 'ST' });
+      break;
+      
+    case '4-3-3':
+      // Defenders
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 35, position_code: 'CB' });
+      positions.push({ x: 20, y: 65, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
+      // Midfielders
+      positions.push({ x: 50, y: 30, position_code: 'CM' });
+      positions.push({ x: 45, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 70, position_code: 'CM' });
+      // Forwards
+      positions.push({ x: 80, y: 25, position_code: 'LW' });
+      positions.push({ x: 85, y: 50, position_code: 'ST' });
+      positions.push({ x: 80, y: 75, position_code: 'RW' });
+      break;
+      
+    case '3-5-2':
+      // Defenders
+      positions.push({ x: 20, y: 30, position_code: 'CB' });
+      positions.push({ x: 18, y: 50, position_code: 'CB' });
+      positions.push({ x: 20, y: 70, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 50, y: 15, position_code: 'LM' });
+      positions.push({ x: 45, y: 35, position_code: 'CM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 45, y: 65, position_code: 'CM' });
+      positions.push({ x: 50, y: 85, position_code: 'RM' });
+      // Forwards
+      positions.push({ x: 80, y: 40, position_code: 'ST' });
+      positions.push({ x: 80, y: 60, position_code: 'ST' });
+      break;
+      
+    case '4-5-1':
+      // Defenders
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 35, position_code: 'CB' });
+      positions.push({ x: 20, y: 65, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
+      // Midfielders
+      positions.push({ x: 55, y: 15, position_code: 'LM' });
+      positions.push({ x: 50, y: 30, position_code: 'CM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 70, position_code: 'CM' });
+      positions.push({ x: 55, y: 85, position_code: 'RM' });
+      // Forward
+      positions.push({ x: 85, y: 50, position_code: 'ST' });
+      break;
+      
+    case '3-4-3':
+      // Defenders
+      positions.push({ x: 20, y: 30, position_code: 'CB' });
+      positions.push({ x: 18, y: 50, position_code: 'CB' });
+      positions.push({ x: 20, y: 70, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 50, y: 25, position_code: 'LM' });
+      positions.push({ x: 48, y: 40, position_code: 'CM' });
+      positions.push({ x: 48, y: 60, position_code: 'CM' });
+      positions.push({ x: 50, y: 75, position_code: 'RM' });
+      // Forwards
+      positions.push({ x: 80, y: 25, position_code: 'LW' });
+      positions.push({ x: 85, y: 50, position_code: 'ST' });
+      positions.push({ x: 80, y: 75, position_code: 'RW' });
+      break;
+      
+    case '5-3-2':
+      // Defenders
+      positions.push({ x: 28, y: 15, position_code: 'LB' });
+      positions.push({ x: 22, y: 30, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 70, position_code: 'CB' });
+      positions.push({ x: 28, y: 85, position_code: 'RB' });
+      // Midfielders
+      positions.push({ x: 55, y: 30, position_code: 'CM' });
+      positions.push({ x: 52, y: 50, position_code: 'CM' });
+      positions.push({ x: 55, y: 70, position_code: 'CM' });
+      // Forwards
+      positions.push({ x: 82, y: 40, position_code: 'ST' });
+      positions.push({ x: 82, y: 60, position_code: 'ST' });
+      break;
+      
+    // 7v7 Formations
+    case '2-3-1':
+      // Defenders
+      positions.push({ x: 22, y: 35, position_code: 'CB' });
+      positions.push({ x: 22, y: 65, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 50, y: 25, position_code: 'LM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 75, position_code: 'RM' });
+      // Forward
+      positions.push({ x: 80, y: 50, position_code: 'ST' });
+      break;
+      
+    case '3-2-1':
+      // Defenders
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 50, y: 35, position_code: 'CM' });
+      positions.push({ x: 50, y: 65, position_code: 'CM' });
+      // Forward
+      positions.push({ x: 80, y: 50, position_code: 'ST' });
+      break;
+      
+    // 9v9 Formations
+    case '3-3-2':
+      // Defenders
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 50, y: 25, position_code: 'LM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 75, position_code: 'RM' });
+      // Forwards
+      positions.push({ x: 78, y: 40, position_code: 'ST' });
+      positions.push({ x: 78, y: 60, position_code: 'ST' });
+      break;
+      
+    case '3-2-3':
+      // Defenders
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 48, y: 35, position_code: 'CM' });
+      positions.push({ x: 48, y: 65, position_code: 'CM' });
+      // Forwards
+      positions.push({ x: 78, y: 25, position_code: 'LW' });
+      positions.push({ x: 82, y: 50, position_code: 'ST' });
+      positions.push({ x: 78, y: 75, position_code: 'RW' });
+      break;
+      
+    // 10v10 Formations
+    case '3-4-2':
+      // Defenders
+      positions.push({ x: 22, y: 25, position_code: 'CB' });
+      positions.push({ x: 20, y: 50, position_code: 'CB' });
+      positions.push({ x: 22, y: 75, position_code: 'CB' });
+      // Midfielders
+      positions.push({ x: 50, y: 20, position_code: 'LM' });
+      positions.push({ x: 48, y: 40, position_code: 'CM' });
+      positions.push({ x: 48, y: 60, position_code: 'CM' });
+      positions.push({ x: 50, y: 80, position_code: 'RM' });
+      // Forwards
+      positions.push({ x: 78, y: 40, position_code: 'ST' });
+      positions.push({ x: 78, y: 60, position_code: 'ST' });
+      break;
+      
+    case '4-3-2':
+      // Defenders
+      positions.push({ x: 25, y: 20, position_code: 'LB' });
+      positions.push({ x: 20, y: 40, position_code: 'CB' });
+      positions.push({ x: 20, y: 60, position_code: 'CB' });
+      positions.push({ x: 25, y: 80, position_code: 'RB' });
+      // Midfielders
+      positions.push({ x: 50, y: 30, position_code: 'CM' });
+      positions.push({ x: 48, y: 50, position_code: 'CM' });
+      positions.push({ x: 50, y: 70, position_code: 'CM' });
+      // Forwards
+      positions.push({ x: 78, y: 40, position_code: 'ST' });
+      positions.push({ x: 78, y: 60, position_code: 'ST' });
+      break;
+      
+    default:
+      // Default to 4-4-2 positions (or adapt for field size)
+      const fieldSize = state.fieldSize || 11;
+      for (let i = 1; i < fieldSize; i++) {
+        positions.push({ x: (i % 3) * 30 + 25, y: Math.floor(i / 3) * 20 + 30, position_code: 'MID' });
+      }
+  }
+  
+  return positions;
+}
+
+async function createFromTemplate() {
+  try {
+    const response = await fetch('/api/formations/templates');
+    const data = await response.json();
+    
+    if (data.success && data.templates.length > 0) {
+      const list = ui.templateList;
+      list.innerHTML = '';
+      
+      data.templates.forEach((template, index) => {
+        const div = document.createElement('div');
+        div.className = 'panel';
+        div.style.cssText = 'margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;';
+        div.innerHTML = `
+          <strong>${template.name}</strong><br>
+          <span class="hint">${template.description || 'No description'}</span>
+        `;
+        
+        div.onclick = () => {
+          // Clear previous selection
+          list.querySelectorAll('.panel').forEach(p => p.style.borderColor = 'transparent');
+          div.style.borderColor = 'var(--accent)';
+          list.selectedTemplate = template;
+        };
+        
+        list.appendChild(div);
+      });
+      
+      ui.templateModal.classList.remove('hidden');
+    } else {
+      alert('No formation templates available');
+    }
+  } catch (error) {
+    console.error('Failed to load templates:', error);
+    alert('Failed to load templates');
+  }
+}
+
+async function createFormationFromTemplate() {
+  const selectedTemplate = ui.templateList.selectedTemplate;
+  const name = ui.templateFormationName.value.trim();
+  
+  if (!selectedTemplate) {
+    alert('Please select a template');
+    return;
+  }
+  
+  if (!name) {
+    alert('Please enter a formation name');
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/formations/from-template', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        template_type: selectedTemplate.formation_type,
+        name
+      })
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      ui.templateModal.classList.add('hidden');
+      ui.templateFormationName.value = '';
+      await renderFormations();
+      ui.formationSelect.value = name;
+      await onFormationSelect();
+      alert('Formation created from template!');
+    } else {
+      alert('Error: ' + data.error);
+    }
+  } catch (error) {
+    console.error('Failed to create from template:', error);
+    alert('Failed to create formation from template');
+  }
+}
+
+async function deleteFormation() {
+  if (!currentFormation) {
+    alert('No formation selected');
+    return;
+  }
+  
+  if (!confirm(`Delete formation "${currentFormation.name}"?`)) {
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/formations/${encodeURIComponent(currentFormation.name)}`, {
+      method: 'DELETE'
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      currentFormation = null;
+      clearFormationDisplay();
+      await renderFormations();
+      alert('Formation deleted');
+    } else {
+      alert('Error: ' + data.error);
+    }
+  } catch (error) {
+    console.error('Failed to delete formation:', error);
+    alert('Failed to delete formation');
+  }
+}
+
+async function saveFormation() {
+  if (!currentFormation) {
+    alert('No formation selected');
+    return;
+  }
+  
+  // Update formation with current form values
+  currentFormation.name = ui.formationName.value.trim();
+  currentFormation.formation_type = ui.formationType.value;
+  currentFormation.description = ui.formationDescription.value.trim();
+  
+  if (!currentFormation.name) {
+    alert('Formation name is required');
+    return;
+  }
+  
+  try {
+    // For now, we'll just save the changes (the formation is already updated in memory)
+    alert('Formation saved! (Note: Full save functionality requires backend implementation)');
+  } catch (error) {
+    console.error('Failed to save formation:', error);
+    alert('Failed to save formation');
+  }
+}
+
+async function autoAssignPlayers() {
+  if (!currentFormation) {
+    alert('No formation selected');
+    return;
+  }
+  
+  try {
+    const assignments = {};
+    const availablePlayers = [...state.roster];
+    
+    currentFormation.positions.forEach((position, index) => {
+      if (availablePlayers.length > 0) {
+        const player = availablePlayers.shift();
+        assignments[index] = player.name;
+      }
+    });
+    
+    const response = await fetch(`/api/formations/${encodeURIComponent(currentFormation.name)}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments })
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      currentFormation = data.formation;
+      displayFormation(currentFormation);
+      alert('Players auto-assigned!');
+    }
+  } catch (error) {
+    console.error('Failed to auto-assign:', error);
+    alert('Failed to auto-assign players');
+  }
+}
+
+async function clearAssignments() {
+  if (!currentFormation) {
+    alert('No formation selected');
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/formations/${encodeURIComponent(currentFormation.name)}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignments: {} })
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      currentFormation = data.formation;
+      displayFormation(currentFormation);
+      alert('All assignments cleared!');
+    }
+  } catch (error) {
+    console.error('Failed to clear assignments:', error);
+    alert('Failed to clear assignments');
+  }
+}
+
+async function suggestFormation() {
+  try {
+    const response = await fetch('/api/formations/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      currentFormation = data.formation;
+      displayFormation(currentFormation);
+      alert(`Suggested formation: ${data.formation.name}\nBased on your current roster.`);
+    } else {
+      alert('Error: ' + data.error);
+    }
+  } catch (error) {
+    console.error('Failed to suggest formation:', error);
+    alert('Failed to suggest formation');
+  }
+}
+
+function clearFormationDisplay() {
+  ui.formationName.value = '';
+  ui.formationType.value = '4-4-2';
+  ui.formationDescription.value = '';
+  ui.formationPositions.innerHTML = '';
+  ui.formationInfo.textContent = 'No formation selected';
+  ui.positionAssignments.innerHTML = '<div class="hint">Select a formation to assign players</div>';
+}
+
+/** -------------------------
+ *  Boot
+ *  ------------------------- */
+function renderAll() {
+  renderSetup();
+  renderLineup();
+  renderGame();
+  renderReports();
+  renderPlayers();
+  renderFormations();
+}
+
+export function initializeApp() {
+  console.log('[DEBUG] Starting initialization...');
+  loadLocal();
+  console.log('[DEBUG] Local state loaded');
+  renderAll();
+  console.log('[DEBUG] All views rendered');
+  show("setup");
+  console.log('[DEBUG] Showing setup view');
+  startTick(); // keep countdown labels alive even when paused
+  console.log('[DEBUG] Application fully initialized and ready!');
+}
+
+// Expose functions used by legacy inline handlers.
+window.apiAddStoppageTime = apiAddStoppageTime;
+window.apiAddTimeAdjustment = apiAddTimeAdjustment;
+window.exportReportCSV = exportReportCSV;
+window.removeQueue = removeQueue;
+window.editPlayerInline = editPlayerInline;
+window.deletePlayerInline = deletePlayerInline;

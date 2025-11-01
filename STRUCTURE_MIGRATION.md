@@ -25,6 +25,20 @@ soccer_coach/
 │   │   └── time_utils.py        # Time formatting utilities
 │   └── __init__.py              # Main package init
 ├── tests/                       # Test files (NEW)
+├── frontend/                    # Modern web UI source (NEW)
+│   ├── package.json             # Front-end dependencies & scripts
+│   ├── vite.config.js           # Vite build configuration
+│   └── src/
+│       ├── main.js              # Front-end entry module
+│       ├── app.js               # Core web UI logic
+│       └── styles/
+│           └── main.css         # Front-end styles
+├── templates/                   # Flask HTML templates (NEW)
+│   ├── base.html
+│   ├── index.html
+│   └── partials/
+│       └── main_layout.html
+├── web_dist/                    # Compiled web assets (generated)
 ├── docs/                        # Documentation
 │   └── app-analysis-and-improvement-plan.md
 ├── config/                      # Configuration files (NEW)
@@ -33,8 +47,7 @@ soccer_coach/
 ├── test_structure.py            # Structure verification test
 ├── requirements.txt             # Dependencies
 ├── coach_timer.py               # Legacy desktop entry (backward compatibility)
-├── app.py                       # Legacy web entry (backward compatibility)
-└── index.html                   # Web interface
+└── app.py                       # Legacy web entry (backward compatibility)
 ```
 
 ## Running the Application
@@ -144,6 +157,10 @@ pip install -r requirements.txt  # Install dependencies if needed
 2. **Business Logic**: Add services to `src/services/`
 3. **UI Changes**: Modify `src/ui/tkinter_app.py` or `src/ui/web_app.py`
 4. **Utilities**: Add common functions to `src/utils/`
+
+### Web Front-End
+- Front-end source lives in `frontend/src/` with Vite configuration.
+- See `docs/frontend-build.md` for dev server and build commands.
 
 ## Installation & Dependencies
 
